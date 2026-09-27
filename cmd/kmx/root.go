@@ -116,17 +116,35 @@ func newRootCommand(state *commandState) *cobra.Command {
 	root.AddCommand(
 		newVersionCommand(state), newCompletionCommand(root), newCtxCommand(state),
 		newQuickstartCommand(state), newQuickstartWizardCommand(state), newUpCommand(state), newLiftCommand(state), newAKSCommand(state),
-		newPlaneCommand(state), newGovernCommand(state), newCredentialsCommand(state), newCredentialCommand(state),
+		newPlaneCommand(state), newCredentialsCommand(state), newCredentialCommand(state),
 		newLedgerCommand(state), newFlowCommand(state),
 		newWatchCommand(state),
 		newConsoleCommand(state),
-		newUseCommand(state),
 		newBudgetCommand(state), newModelsCommand(state), newMigrateCommand(state),
 		newOrkaCommand(state),
 		newBackupCommand(state), newRestoreCommand(state),
 		newMetricsCommand(state), newStatusCommand(state), newDownCommand(state), newAgentCommand(state),
+		retiredCommand("govern", "kmx migrate <deployment> --namespace <ns> --model <model>, or kmx credential issue <name> --secret <secret> --namespace <ns>"),
+		retiredCommand("use", "kmx models add <name> --url <url> --classification <class>, then kmx migrate <deployment> --namespace <ns> --model <model>"),
 	)
 	return root
+}
+
+// Keep retired spellings parseable but absent from help and completion.
+// Returning directly avoids loading config for commands with no surviving runtime.
+func retiredCommand(name, replacement string) *cobra.Command {
+	notice := func(cmd *cobra.Command) string {
+		return fmt.Sprintf("%s is retired; use %s", cmd.CommandPath(), replacement)
+	}
+	cmd := &cobra.Command{Use: name, Hidden: true,
+		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return errors.New(notice(cmd))
+		}}
+	cmd.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
+		fmt.Fprintln(cmd.OutOrStdout(), notice(cmd))
+	})
+	return cmd
 }
 
 func appRun(state *commandState, fn func(*app.App) error) func(*cobra.Command, []string) error {
