@@ -104,11 +104,13 @@ and stored in the database only as hashes.
 legacy no-expiry class. The retired grant view is not an expiry inspection path.
 [Metrics](operations.md#metrics) retain credential and certificate expiry gauges.
 
-A kagent `Accepted` condition is a cached reconcile verdict, not a live
-credential check. Secret projection is asynchronous. `kmx status` reports cached
-conditions and their age; pod readiness is a separate signal. The retired
-RemoteMCPServer credential-acceptance flow is not a model authentication test.
-TLS certificate expiry can also surface as a generic connection failure; see [certificate renewal](operations.md#the-seam-certificate).
+A controller's `Accepted` condition is a cached reconcile verdict, not a live
+credential check, and Secret projection is asynchronous. `kmx status` no longer
+reports those conditions: it reports Orka's installed runtime and resolution,
+then the model plane's Deployment and proxy pod readiness and the seam serving
+certificate's expiry. Neither Orka nor plane readiness proves a credential is
+valid. TLS certificate expiry can also surface as a generic connection failure;
+see [certificate renewal](operations.md#the-seam-certificate).
 
 ## Privacy and evidence
 
