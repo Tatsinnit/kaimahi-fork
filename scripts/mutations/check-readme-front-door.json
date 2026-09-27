@@ -53,10 +53,16 @@
       "replace": "    (\"runtime ownership note\", r\"\"),"
     },
     {
-      "name": "the install revision check is dropped",
-      "breaks": "An obsolete tagged CLI or an empty revision can satisfy the current quickstart prerequisite.",
-      "find": "@(?:main|[0-9a-f]{7,40})(?=[ \\t]*(?:#.*)?$)",
-      "replace": "@"
+      "name": "the quickstart subshell boundary is ignored",
+      "breaks": "A failed download can exit the reader's shell rather than only the setup snippet.",
+      "find": "    (\"quickstart subshell\", r\"^\\($\"),",
+      "replace": "    (\"quickstart subshell\", r\"\"),"
+    },
+    {
+      "name": "the verified installer check is dropped",
+      "breaks": "A direct or wrong-repository download can satisfy the quickstart prerequisite.",
+      "find": "^  curl -fsSL https://raw\\.githubusercontent\\.com/kaimahi-agents/kaimahi/main/install\\.sh -o \\\"\\$installer\\\" \\|\\| exit$",
+      "replace": "^  curl.*$"
     },
     {
       "name": "the journey create marker matches anything",
@@ -73,8 +79,20 @@
     {
       "name": "a word boundary accepts obsolete quickstart command names",
       "breaks": "A hyphenated non-command can satisfy the runnable quickstart step.",
-      "find": "^kmx quickstart-wizard(?=[ \\t]*(?:#.*)?$)",
-      "replace": "^kmx quickstart-wizard\\b"
+      "find": "^  sh \\\"\\$installer\\\" --quickstart$",
+      "replace": "^  sh \\\"\\$installer\\\" --quickstart\\b"
+    },
+    {
+      "name": "the pinned Go install check accepts any version",
+      "breaks": "A secondary Go-install example can silently switch back to v0.1.0 or a moving branch.",
+      "find": "^GOBIN=\\\"\\$HOME/\\.local/bin\\\" go install github\\.com/kaimahi-agents/kaimahi/cmd/kmx@v0\\.2\\.0 && \\\"\\$HOME/\\.local/bin/kmx\\\" quickstart$",
+      "replace": "^GOBIN=.*go install.*$"
+    },
+    {
+      "name": "the Go install check accepts a stale kmx on PATH",
+      "breaks": "A failed Go build or earlier PATH entry can run an older kmx.",
+      "find": "^GOBIN=\\\"\\$HOME/\\.local/bin\\\" go install github\\.com/kaimahi-agents/kaimahi/cmd/kmx@v0\\.2\\.0 && \\\"\\$HOME/\\.local/bin/kmx\\\" quickstart$",
+      "replace": "^.*go install github\\.com/kaimahi-agents/kaimahi/cmd/kmx@v0\\.2\\.0.*$"
     },
     {
       "name": "the journey command list is emptied",
