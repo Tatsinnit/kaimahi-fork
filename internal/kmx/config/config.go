@@ -26,12 +26,10 @@ const (
 	DefaultAdminPort = "19091"
 	// DefaultOpsPort is the local side of the metrics forward. Keeping one
 	// default makes a stale forward fail closed at bind time.
-	DefaultOpsPort   = "19092"
-	DefaultAgent     = "hello-world"
-	DefaultTask      = "Hello! Who are you and where are you running?"
-	DefaultNamespace = "kagent"
-	// DefaultCredential is the Makefile's CRED: the credential the ledger is
-	// read for by default.
+	DefaultOpsPort = "19092"
+	DefaultTask    = "Hello! Who are you and where are you running?"
+	// DefaultCredential is the Makefile's CRED, used by bare budget commands.
+	// Ledger without a credential instead reads across all credentials.
 	DefaultCredential = "hello-world"
 	// GovernedSecret is the workload-side Secret an issued token is stored
 	// in by default.
@@ -58,8 +56,13 @@ const (
 	PlaneCASecret        = "kaimahi-plane-ca"
 	// PlaneCAKey is the key inside PlaneCASecret, and the one a workload's
 	// model client verifies the seam against.
-	PlaneCAKey             = "ca.crt"
-	GuardNamespaces        = "kagent, kaimahi, ollama"
+	PlaneCAKey = "ca.crt"
+	// GuardNamespaces names the common fixed namespaces. Some operations also
+	// write to a caller-selected workload namespace; the generic banner must
+	// not present this list as a complete destination set. Known Orka-path
+	// destinations still get their exact list from app.GuardCreateIn.
+	GuardNamespaces        = "kaimahi, ollama, orka-system"
+	GuardNamespaceHint     = GuardNamespaces + " (common, not exhaustive; see action for other namespaces)"
 	DefaultContainerEngine = "docker"
 )
 

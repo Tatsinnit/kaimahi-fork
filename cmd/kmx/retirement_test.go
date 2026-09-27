@@ -35,7 +35,10 @@ func TestLegacyRuntimeCommandsAreRetired(t *testing.T) {
 		{[]string{"govern", "hello-world"}, "kmx migrate"},
 		{[]string{"govern", "hello-world", "--model", "governed-ollama"}, "kmx migrate"},
 		{[]string{"--context", "kind-stale", "govern"}, "kmx migrate"},
+		{[]string{"use"}, "kmx models add"},
+		{[]string{"use", "ollama"}, "kmx models add"},
 		{[]string{"use", "ollama", "--agent", "hello-world"}, "kmx models add"},
+		{[]string{"agent", "edit", "hello-world"}, "kmx agent edit is retired; use kubectl"},
 		{[]string{"agent", "edit", "hello-world", "--file", "agent.yaml"}, "kmx agent edit is retired; use kubectl"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
