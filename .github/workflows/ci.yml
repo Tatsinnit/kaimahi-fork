@@ -951,7 +951,7 @@ jobs:
           grep -q -- '--- PASS: TestStateDirUsesPortableOverrideAndNativeDefault' state-dir.out
 
           go test ./internal/kmx/app \
-            -run '^(TestAgentLocationsPersistSeparateClustersPrivately|TestAgentTUIEnvironmentClassificationAndKubeconfigIsolation|TestAgentTUIProviderAndHostOverrideInferenceInfo|TestConsoleInferenceSourcePersistenceAndValidation|TestLiftPreferencesPersistScopedSelections|TestFoundryConfigRejectsTokenRedirectDestinations)$' \
+            -run '^(TestAgentLocationsPersistSeparateClustersPrivately|TestAgentTUIEnvironmentClassificationAndKubeconfigIsolation|TestAgentTUIProviderAndHostOverrideInferenceInfo|TestConsoleInferenceSourcePersistenceAndValidation|TestLiftPreferencesPersistScopedSelections|TestFoundryConfigRejectsTokenRedirectDestinations|TestBundleLiftSelectionPathUsesKMXHome|TestEvaluateUsesRememberedTarget)$' \
             -count=1 -v | tee app-state.out
           for test in \
             TestAgentLocationsPersistSeparateClustersPrivately \
@@ -959,7 +959,9 @@ jobs:
             TestAgentTUIProviderAndHostOverrideInferenceInfo \
             TestConsoleInferenceSourcePersistenceAndValidation \
             TestLiftPreferencesPersistScopedSelections \
-            TestFoundryConfigRejectsTokenRedirectDestinations; do
+            TestFoundryConfigRejectsTokenRedirectDestinations \
+            TestBundleLiftSelectionPathUsesKMXHome \
+            TestEvaluateUsesRememberedTarget; do
             grep -q -- "--- PASS: $test" app-state.out
           done
           ! grep -q -- '--- SKIP:' state-dir.out app-state.out
