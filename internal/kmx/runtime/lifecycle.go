@@ -21,21 +21,51 @@ type LifecycleAdapter interface {
 	// authoritative portable-identity input. An adapter may decode them to learn
 	// what to render, but must not render from a re-serialized copy.
 	Render(context.Context, []byte, RenderOptions) (RenderedBundle, error)
-	// Deploy applies exactly the bundle Render produced, never a re-render.
-	Deploy(context.Context, RenderedBundle, DeployOptions) (AgentRef, error)
+	// Deploy uses Render's bundle without re-rendering; a reconciler may add
+	// ownership metadata to the write payload without changing the digest.
+	Deploy(context.Context, RenderedBundle, DeployOptions) (DeployResult, error)
 	Status(context.Context, AgentRef, StatusOptions) (Status, error)
 	Evaluate(context.Context, AgentRef, EvaluationRequest) (EvaluationReceipt, error)
 }
 
-// RenderOptions, DeployOptions and StatusOptions are reserved for
-// adapter-specific tuning. They define no fields yet: adapter-local knobs stay
-// in the owning adapter, and fields can be added later without changing any
-// method signature.
-type (
-	RenderOptions struct{}
-	DeployOptions struct{}
-	StatusOptions struct{}
+// DeployOptions keeps the create-only path as the zero value. Reconcile is
+// desired-state deployment; runtimes that do not support it must refuse it.
+type RenderOptions struct{}
+type DeployOptions struct{ Reconcile bool }
+type StatusOptions struct{}
+
+// DeployResult carries a ready deployment's reference and history data. A
+// failed deploy has no receipt, even if some resources were written.
+type DeployResult struct {
+	Ref     AgentRef
+	Receipt DeployReceipt
+}
+
+type DeployTarget struct {
+	Runtime            ID
+	Context, Namespace string
+}
+
+type ResourceOutcome string
+
+const (
+	ResourceCreated ResourceOutcome = "created"
+	ResourceReused  ResourceOutcome = "reused"
+	ResourceUpdated ResourceOutcome = "updated"
+	ResourceAdopted ResourceOutcome = "adopted"
 )
+
+type ResourceResult struct {
+	Kind, Name, Namespace, UID string
+	Generation                 int64
+	Outcome                    ResourceOutcome
+}
+
+type DeployReceipt struct {
+	Bundle, PortableDigest, RenderedDigest string
+	Target                                 DeployTarget
+	Resources                              []ResourceResult
+}
 
 // EvaluationRequest carries one evaluation case: identity, input, and the
 // assertions the terminal answer must satisfy.

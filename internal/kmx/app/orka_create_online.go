@@ -58,6 +58,10 @@ func (b *orkaBoundedBuffer) Write(p []byte) (int, error) {
 // pinned, cancellable adapter as this command's other reads. Namespace is the
 // user's explicit Orka selection, not the wider banner's fixed list.
 func (a *App) guardOrkaCreate(ctx context.Context, opt CreateOptions) error {
+	return a.guardOrkaMutation(ctx, opt, "")
+}
+
+func (a *App) guardOrkaMutation(ctx context.Context, opt CreateOptions, reconcileAction string) error {
 	if a.guarded {
 		return nil
 	}
@@ -80,6 +84,9 @@ func (a *App) guardOrkaCreate(ctx context.Context, opt CreateOptions) error {
 	if opt.DryRun {
 		action = "server dry-run Orka resources in " + opt.Namespace
 	}
+	if reconcileAction != "" {
+		action = reconcileAction
+	}
 	if err := guard.CheckContext(ctx, cfg, guard.Request{Action: action, Context: a.Cfg.KubeContext, Source: a.Cfg.ContextSource, Namespaces: opt.Namespace, Confirm: a.Cfg.Confirm, Command: command}, a.Err, a.Stdin); err != nil {
 		return err
 	}
@@ -93,7 +100,7 @@ func (a *App) guardOrkaCreate(ctx context.Context, opt CreateOptions) error {
 // render and no rendered bytes to emit — the artifact is serialized from the
 // bundle itself, exactly as it always was.
 func (a *App) createOrkaOnline(ctx context.Context, opt CreateOptions, bundle *scaffold.OrkaBundle) error {
-	_, err := a.createOrkaStaged(ctx, opt, bundle, bundle.YAML)
+	_, err := a.createOrkaStaged(ctx, opt, bundle, bundle.YAML, nil)
 	return err
 }
 
@@ -112,7 +119,7 @@ func (a *App) createOrkaOnline(ctx context.Context, opt CreateOptions, bundle *s
 //
 // It returns the created Agent's identity so a lifecycle Deploy can name what
 // it created. A --dry-run create writes nothing and returns a zero identity.
-func (a *App) createOrkaStaged(ctx context.Context, opt CreateOptions, bundle *scaffold.OrkaBundle, artifact func(provenance string) (string, error)) (agent orkaIdentity, err error) {
+func (a *App) createOrkaStaged(ctx context.Context, opt CreateOptions, bundle *scaffold.OrkaBundle, artifact func(provenance string) (string, error), identities *[]orkaIdentity) (agent orkaIdentity, err error) {
 	stage := "Validate schemas and prerequisites"
 	report := func(status string, err error) {
 		if a.operationProgress != nil {
@@ -259,6 +266,9 @@ func (a *App) createOrkaStaged(ctx context.Context, opt CreateOptions, bundle *s
 			return orkaIdentity{}, err
 		}
 		report("done", nil)
+		if identities != nil {
+			*identities = append(*identities, id)
+		}
 	}
 	if bundle.Task == nil {
 		a.notef("Orka Provider and Agent are Ready; no model response was tested.")
@@ -278,6 +288,9 @@ func (a *App) createOrkaStaged(ctx context.Context, opt CreateOptions, bundle *s
 		return orkaIdentity{}, err
 	}
 	a.notef("Task/%s UID %s succeeded and its answer was retrieved. Fresh-name and UID checks do not bind the result bytes to a UID.", id.Name, id.UID)
+	if identities != nil {
+		*identities = append(*identities, id)
+	}
 	return agent, nil
 }
 
@@ -390,17 +403,38 @@ func (a *App) waitOrkaReady(ctx context.Context, namespace string, id orkaIdenti
 		if err != nil {
 			return err
 		}
-		if object.Status.Ready {
-			for _, condition := range object.Status.Conditions {
-				if condition.Type == "Ready" && condition.Status == "True" && condition.ObservedGeneration == id.Generation {
-					return nil
-				}
-			}
+		if orkaCurrentGenerationReady(object, id.Generation) {
+			return nil
 		}
 		if err := orkaPause(ctx); err != nil {
 			return fmt.Errorf("waiting for %s/%s UID %s current-generation Ready: %w", id.Kind, id.Name, id.UID, err)
 		}
 	}
+}
+
+// verifyOrkaReadyNow is a bounded final observation, not another wait: a
+// resource that regressed while later resources started cannot earn a receipt.
+func (a *App) verifyOrkaReadyNow(ctx context.Context, namespace string, id orkaIdentity) error {
+	object, err := a.readOrkaObject(ctx, namespace, id)
+	if err != nil {
+		return err
+	}
+	if !orkaCurrentGenerationReady(object, id.Generation) {
+		return fmt.Errorf("%s/%s UID %s is no longer current-generation Ready; refusing deployment receipt", id.Kind, id.Name, id.UID)
+	}
+	return nil
+}
+
+func orkaCurrentGenerationReady(object *orkaObject, generation int64) bool {
+	if !object.Status.Ready {
+		return false
+	}
+	for _, condition := range object.Status.Conditions {
+		if condition.Type == "Ready" && condition.Status == "True" && condition.ObservedGeneration == generation {
+			return true
+		}
+	}
+	return false
 }
 
 func orkaPause(ctx context.Context) error {
