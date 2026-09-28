@@ -75,6 +75,37 @@ func TestLiftBundlePlanIsReadOnlyAndMapsTargetProvider(t *testing.T) {
 	}
 }
 
+// A comment-only portable change leaves rendered fields unchanged, but lift
+// still refreshes both ownership digests. Plan must say that it will write.
+func TestLiftBundlePlanReportsMarkerRefresh(t *testing.T) {
+	a, opt, dir, notes := liftBundleFixture(t)
+	if err := a.LiftAgentBundle(opt); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(opt.BundleDir, "agent.yaml")
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(original, []byte("\n# comment-only revision\n")...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	notes.Reset()
+	before := len(orkaCalls(t, dir))
+	opt.Plan = true
+	if err := a.LiftAgentBundle(opt); err != nil {
+		t.Fatal(err)
+	}
+	if got := notes.String(); strings.Count(got, "reused; ownership markers would be refreshed") != 2 {
+		t.Fatalf("plan hid two planned marker writes: %s", got)
+	}
+	for _, call := range orkaCalls(t, dir)[before:] {
+		if slices.Contains(call.Args, "patch") || call.Document != nil && !slices.Contains(call.Args, "--dry-run=server") {
+			t.Fatalf("plan wrote resource: %+v", call)
+		}
+	}
+}
+
 // A selected inference Provider with the rendered Agent's name must never be
 // adopted, replaced, or reused as the newly rendered Provider.
 func TestLiftBundleReportsIndependentOrkaAndNamespaceGaps(t *testing.T) {
@@ -205,8 +236,13 @@ func TestLiftBundleReceiptGitCommitTracksOnlyPortableRevision(t *testing.T) {
 	// Git's skip-worktree hint can hide modified bytes from `git diff`; the
 	// receipt must compare the actual portable file to HEAD instead.
 	runGit("update-index", "--skip-worktree", "portable/agent.yaml")
+	var editedNotes bytes.Buffer
+	a.Err = &editedNotes
 	if err := a.LiftAgentBundle(opt); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(editedNotes.String(), "working file differs from HEAD") {
+		t.Fatalf("warning did not identify edited file: %s", editedNotes.String())
 	}
 	data, err = os.ReadFile(path)
 	if err != nil {
@@ -250,7 +286,7 @@ func TestLiftBundleSavesReceiptAndRefusesStaleRememberedCluster(t *testing.T) {
 	if wrapper.Receipt.PortableDigest != agentruntime.PortableBundleDigest(source) {
 		t.Fatal("receipt directory changed digest of exact agent.yaml bytes")
 	}
-	if strings.Count(notes.String(), "uncommitted") != 1 || !strings.Contains(notes.String(), "untracked or differs from HEAD") {
+	if strings.Count(notes.String(), "uncommitted") != 1 || !strings.Contains(notes.String(), "not in a Git repository") {
 		t.Fatalf("git warning missing, misleading or duplicated: %s", notes.String())
 	}
 	firstDigest := wrapper.Receipt.PortableDigest

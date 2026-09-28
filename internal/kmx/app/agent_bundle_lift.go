@@ -177,7 +177,7 @@ func (a *App) LiftAgentBundle(opt LiftAgentBundleOptions) error {
 	}
 	gitCommit := liftAgentCommit(ctx, bundle, rendered.PortableDigest())
 	if gitCommit == "uncommitted" {
-		worker.notef("Warning: agent.yaml is uncommitted (untracked or differs from HEAD, including staged changes)")
+		worker.notef("Warning: agent.yaml is uncommitted (%s)", liftAgentUncommittedReason(ctx, bundle))
 	}
 	wrapped := bundleLiftReceipt{Receipt: deployed.Receipt, GitCommit: gitCommit}
 	if err := writeLiftReceipt(bundle, uid, wrapped); err != nil {
@@ -373,6 +373,10 @@ func (a *App) liftToolsAvailable(ctx context.Context, namespace string, bundle *
 }
 
 func (a *App) printLiftDecision(check orkaReconcileCheck) {
+	if check.markerRefresh {
+		a.notef("%s/%s: reused; ownership markers would be refreshed", check.id.Kind, check.id.Name)
+		return
+	}
 	if check.outcome == agentruntime.ResourceUpdated {
 		a.notef("%s/%s: updated; differing rendered fields: %s", check.id.Kind, check.id.Name, strings.Join(orkaChangedFields(check.existing, check.candidate), ", "))
 		return
@@ -447,6 +451,34 @@ func writeLiftReceipt(bundle, clusterUID string, receipt bundleLiftReceipt) erro
 		return err
 	}
 	return writePrivateAgentFile(path, append(raw, '\n'))
+}
+
+// liftAgentUncommittedReason identifies which part of the exact-file Git check
+// failed without printing Git stderr or any file content.
+func liftAgentUncommittedReason(ctx context.Context, bundle string) string {
+	gitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	rootRaw, err := exec.CommandContext(gitCtx, "git", "-C", bundle, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "not in a Git repository"
+	}
+	root := strings.TrimSpace(string(rootRaw))
+	rel, err := filepath.Rel(root, filepath.Join(bundle, "agent.yaml"))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "outside the Git repository"
+	}
+	if _, err := exec.CommandContext(gitCtx, "git", "-C", root, "show", "HEAD:"+filepath.ToSlash(rel)).Output(); err != nil {
+		return "not tracked in HEAD"
+	}
+	if err := exec.CommandContext(gitCtx, "git", "-C", root, "diff", "--cached", "--quiet", "HEAD", "--", rel).Run(); err != nil {
+		return "staged changes differ from HEAD"
+	}
+	committed, err := exec.CommandContext(gitCtx, "git", "-C", root, "show", "HEAD:"+filepath.ToSlash(rel)).Output()
+	portable, readErr := os.ReadFile(filepath.Join(bundle, "agent.yaml"))
+	if err == nil && readErr == nil && !bytes.Equal(portable, committed) {
+		return "working file differs from HEAD"
+	}
+	return "Git revision could not be verified"
 }
 
 // Determine provenance only from the exact portable file. Unrelated untracked
