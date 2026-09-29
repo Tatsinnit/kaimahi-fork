@@ -599,8 +599,17 @@ const bundleGitHistoryLimit = 200
 // digest, returning its full SHA. found is false when no match exists
 // inside that bounded window, including when the deployed revision was only
 // ever staged or edited locally and never committed.
+//
+// The bundle path is resolved first, as bundleLiftSelectionPath does. Git
+// reports the repository root with symlinks resolved, so a bundle reached
+// through a symlink (macOS's /var is one) would otherwise look like a path
+// outside the repository and never match.
 func bundleFindDeployedCommit(ctx context.Context, bundle, liveDigest string) (sha string, found bool) {
 	if liveDigest == "" {
+		return "", false
+	}
+	bundle, err := resolveOrkaPath(bundle)
+	if err != nil {
 		return "", false
 	}
 	gitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

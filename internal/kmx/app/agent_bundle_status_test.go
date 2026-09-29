@@ -570,3 +570,31 @@ func TestBundleDigestBehindFindsMatchWithinFileTouchingHistory(t *testing.T) {
 		t.Fatal("expected no match for a digest outside history")
 	}
 }
+
+// A bundle reached through a symlink is the same bundle. Git reports the
+// repository root with symlinks resolved, so an unresolved bundle path looks
+// like a path outside the repository. The symlink is made explicitly, so this
+// fails on every platform rather than only where the temporary directory is
+// itself behind one, as on macOS.
+func TestBundleDigestBehindFindsMatchThroughASymlinkedPath(t *testing.T) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable")
+	}
+	real := t.TempDir()
+	content := []byte("instructions: deployed\n")
+	if err := os.WriteFile(filepath.Join(real, "agent.yaml"), content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	runBundleStatusGit(t, git, real, "init", "--quiet")
+	runBundleStatusGit(t, git, real, "add", "agent.yaml")
+	runBundleStatusGit(t, git, real, "commit", "--quiet", "-m", "deployed")
+	link := filepath.Join(t.TempDir(), "bundle-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	sha, found := bundleFindDeployedCommit(t.Context(), link, agentruntime.PortableBundleDigest(content))
+	if !found || sha == "" {
+		t.Fatalf("the deployed commit was not found through a symlinked bundle path: sha=%q found=%v", sha, found)
+	}
+}
