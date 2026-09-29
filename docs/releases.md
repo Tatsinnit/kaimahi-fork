@@ -368,7 +368,7 @@ than the first.
    ```bash
    formula=$(mktemp)
    gh release download vX.Y.Z --repo kaimahi-agents/kaimahi \
-     --pattern kmx.rb --output "$formula"
+     --pattern kmx.rb --output "$formula" --clobber
    mv "$formula" Formula/kmx.rb
    ```
 
