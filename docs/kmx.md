@@ -82,7 +82,7 @@ every flag. Command definitions are in [`cmd/kmx`](../cmd/kmx).
 | `kmx agent evaluate <bundle-dir>` | run the bundle's `eval/*.yaml` cases as one Task each against the deployed revision, only when it carries the bundle's current portable digest; print answers, write a receipt with answer digests (never text), exit non-zero unless every case passed. [Bundle evaluation](agent-lift.md#evaluating-a-deployed-revision) |
 | `kmx migrate <deployment>` | inspect workload/Provider; create seam identity and ingress; mint/reconcile credentials; write the owner-applied patch. [Migration](migrate.md) |
 | `kmx ctx [context]` | show target/source/posture or remember a target in kmx's config directory |
-| `kmx console` | two-column local/remote workspace for native Orka Agents, with Vim/arrow navigation, agent actions, inference details and slash-command completion; `--demo` uses sample data. [Console guide](interactive-agent-tui-plan.md) |
+| `kmx console` | two-column local/remote workspace for native Orka Agents, with Vim/arrow navigation, agent actions, inference details and slash-command completion; `b` compares the selected agent with its local bundle using the same report as `kmx agent status`; `--demo` uses sample data. [Console guide](interactive-agent-tui-plan.md) |
 
 ### Existing plane and operator commands
 

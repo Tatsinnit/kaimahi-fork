@@ -88,6 +88,7 @@ is retained by runtime/namespace/name when the selected agent still exists.
 | `g` / `G`, Home / End | First / last agent |
 | Enter | Open available actions for the selected agent; arrows or `j`/`k` select, Enter runs, Esc closes |
 | `i` | Inspect selected agent |
+| `b` | Compare selected agent with its local bundle; see [below](#compare-with-the-local-bundle) |
 | `n` | Create a native Orka agent in the focused environment |
 | `c` | Open selected agent's interactive chat |
 | `L` | Start lift completion for selected local native Orka agent |
@@ -168,6 +169,52 @@ on return (host-only source changes do not patch the cluster). Demo inference
 forms can be completed and reviewed without writing. External Orka
 runtimes remain inspection-only.
 
+## Compare with the local bundle
+
+`b`, or **Compare with local bundle** in the Enter actions menu, opens a pane
+over the inventory for the selected agent. It answers one question: is what is
+running the definition in Git, and if not, what is different?
+
+The pane does not compare anything itself. It asks the same report
+[`kmx agent status`](agent-lift.md) prints, for exactly the selected row's
+context, kubeconfig and namespace, and draws that target's state:
+
+| State | The pane shows |
+|---|---|
+| `in sync` | That the running definition matches `agent.yaml`. A match is not proof the agent answers. |
+| `behind` | What `kmx agent lift` would change: a diff of `agent.yaml` from the deployed commit to the working copy, including uncommitted edits, because the working copy is what lift reads. |
+| `drifted` | The live field paths that changed after the last lift. Values are not shown. |
+| `not deployed`, `belongs to another bundle`, `target changed`, `unknown` | What the state means and what to do. `unknown` says plainly that it is not the same as in sync. |
+
+**The diff comes from Git, never the cluster.** Status treats live values as
+untrusted and never shows them, and the pane keeps that rule: a drifted target
+shows paths, as status does. A behind target can show values because both sides
+of its diff are Git revisions of a document whose schema already refuses
+credentials. Every diff line is still screened against the shared credential
+list, before and after terminal control sequences are removed, so a token
+split by an escape sequence is still caught; a match is replaced by a labelled
+placeholder that keeps its `+`/`-` marker. Git runs without external diff or
+textconv programs, without refreshing `.git/index`, and with the bundle path
+taken literally rather than as a pattern. Only a full commit id is passed to
+it: status reports a 7-character abbreviation, which can be ambiguous or name
+a branch, so the full id is found again with status's own search.
+
+**Finding the bundle.** A console row is a live agent and does not record where
+its files are. The pane looks for `agents/<name>/agent.yaml`, where
+`kmx agent create` writes, relative to where the console was started;
+`--bundles <dir>` names another directory. With no bundle there, the pane says
+where it looked instead of guessing. A bundle there that defines a different
+agent is refused rather than compared.
+
+The pane reads and never writes: no cluster object, receipt, remembered target
+or Git state. `r` reloads the pane's own agent, even if the inventory behind
+it has since moved the selection; closing or reloading cancels a read still
+running. `j`/`k` and PgUp/PgDn scroll, Esc or Enter
+closes. The menu entry is last, so no existing action changes position.
+External runtimes have no bundle, so neither the key nor the menu entry
+is offered for them. Demo mode shows `behind`, `drifted` and `unknown` from
+sample data.
+
 ## Chat and lift
 
 An empty, successfully loaded environment displays
@@ -204,3 +251,14 @@ demo isolation, partial inventory failures, context-pinned reads, resize bounds,
 terminal metadata escaping, and a Linux pseudo-terminal exit/restoration check.
 Cloud provisioning and live agent deployment reuse existing operations; this
 feature's tests do not create Azure resources or prove a live AKS deployment.
+
+The bundle pane is tested against the same fake kubectl and golden bundle as
+`kmx agent status`, with real Git repositories for the behind diff (rooted
+both at the bundle and above it, as in `<repo>/agents/<name>`), including
+uncommitted edits. Tests prove it writes nothing (including `.git/index`,
+under the condition in which git would otherwise refresh it), pins every read
+to the row's context, cancels and drops results for a pane that was since
+closed or reopened, and withholds every shape in the shared credential list,
+whole or split by a control sequence. Each of these tests was checked to fail
+when the behaviour it guards is removed. It has not been run against a live
+cluster.

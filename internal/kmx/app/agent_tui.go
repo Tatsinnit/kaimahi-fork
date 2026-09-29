@@ -61,6 +61,8 @@ type agentTUIModel struct {
 	startInference                               func(agentTUIEnvironment, agentTUIAgent, consoleInferenceSnapshot, consoleInferenceSource, string) (<-chan consoleInferenceSaved, context.CancelFunc)
 	loadCreateTarget                             func(agentTUIEnvironment) (string, error)
 	startCreate                                  func(agentTUIEnvironment, string, CreateOptions) (<-chan agentTUICreateResult, context.CancelFunc)
+	bundle                                       *consoleBundlePane
+	loadBundle                                   func(context.Context, agentTUIEnvironment, agentTUIAgent) consoleBundleSnapshot
 }
 
 func newAgentTUIModel(opt AgentTUIOptions) agentTUIModel {
@@ -138,6 +140,9 @@ func (a *App) AgentTUI(opt AgentTUIOptions) error {
 		m.loadInventory = func(env agentTUIEnvironment) ([]agentTUIAgent, error) {
 			return a.agentTUIInventory(ctx, env, opt.Namespace)
 		}
+		m.loadBundle = func(paneCtx context.Context, env agentTUIEnvironment, agent agentTUIAgent) consoleBundleSnapshot {
+			return a.consoleBundleStatus(paneCtx, env, agent, opt.Bundles)
+		}
 		filter := func(model tea.Model, msg tea.Msg) tea.Msg {
 			if _, ok := msg.(tea.InterruptMsg); ok && (model.(agentTUIModel).creation != nil || model.(agentTUIModel).inference != nil) {
 				return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
@@ -196,6 +201,20 @@ func (m *agentTUIModel) refresh() tea.Cmd {
 }
 
 func (m agentTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if loaded, ok := msg.(consoleBundleLoaded); ok {
+		// Every finished read releases its context, and only the pane still
+		// open is drawn: a read for a pane since closed or reopened is stale.
+		loaded.pane.stop()
+		if m.bundle != nil && loaded.pane == m.bundle {
+			m.bundle.loading, m.bundle.snapshot, m.bundle.scroll = false, loaded.snapshot, 0
+		}
+		return m, nil
+	}
+	if m.bundle != nil {
+		if key, ok := msg.(tea.KeyPressMsg); ok && key.String() != "ctrl+c" {
+			return m.updateBundle(key)
+		}
+	}
 	if m.inference != nil {
 		if size, ok := msg.(tea.WindowSizeMsg); ok {
 			m.width, m.height = size.Width, size.Height
@@ -342,6 +361,8 @@ func (m agentTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "i":
 			m.details = m.selected() != nil
 			m.detailScroll = 0
+		case "b":
+			return m.openBundle()
 		case "n":
 			return m.createAgent()
 		case "c":
@@ -453,6 +474,11 @@ func (m agentTUIModel) agentActions(a agentTUIAgent) []agentTUIMenuAction {
 	if m.focus == 0 && a.canLift() {
 		actions = append(actions, agentTUIMenuAction{"L", "Lift to remote environment"})
 	}
+	// Last, after every entry that existed before it, so no existing entry
+	// moves: an operator who reaches an action by position still reaches it.
+	if !a.External {
+		actions = append(actions, agentTUIMenuAction{"b", "Compare with local bundle"})
+	}
 	return actions
 }
 
@@ -502,6 +528,8 @@ func (m agentTUIModel) updateActions(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "i":
 		m.details = true
 		m.detailScroll = 0
+	case "b":
+		return m.openBundle()
 	case "c":
 		return m.execute("/chat " + m.agentToken(*a, m.focus))
 	case "L":
@@ -907,7 +935,7 @@ func (m agentTUIModel) View() tea.View {
 	case m.help:
 		body = "KEYS & COMMANDS\n\n" +
 			"h/l or ←/→  switch columns; j/k or ↑/↓  select agent\n" +
-			"<enter> actions · i inspect · c chat · L lift local agent · r refresh\n\n" +
+			"<enter> actions · i inspect · b bundle · c chat · L lift local agent · r refresh\n\n" +
 			"n create agent in the focused environment\n" +
 			"/inspect [agent]     details in the focused column\n" +
 			"/chat [agent]        open chat, /exit returns here\n" +
@@ -955,6 +983,10 @@ func (m agentTUIModel) View() tea.View {
 				lipgloss.NewLayer(panel).X((w-lipgloss.Width(panel))/2).Y((h-lipgloss.Height(panel))/2).Z(1),
 			).Render()
 		}
+	}
+	if m.bundle != nil {
+		panel := m.bundleView()
+		content = lipgloss.NewCompositor(lipgloss.NewLayer(content), lipgloss.NewLayer(panel).X((w-lipgloss.Width(panel))/2).Y(max(0, (h-lipgloss.Height(panel))/2)).Z(1)).Render()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

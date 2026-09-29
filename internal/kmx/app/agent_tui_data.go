@@ -16,7 +16,10 @@ import (
 // AgentTUIOptions selects the two environments shown by kmx console.
 type AgentTUIOptions struct {
 	LocalContext, RemoteContext, Namespace string
-	Demo                                   bool
+	// Bundles is the directory holding one bundle per agent, named after it.
+	// Empty means agents/, where `kmx agent create` writes them.
+	Bundles string
+	Demo    bool
 }
 
 type agentTUIEnvironment struct {

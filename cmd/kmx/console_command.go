@@ -14,6 +14,7 @@ func newConsoleCommand(state *commandState) *cobra.Command {
 	cmd.Flags().StringVar(&opt.LocalContext, "local-context", "", "local kind context (default: last TUI selection, configured context, or first local)")
 	cmd.Flags().StringVar(&opt.RemoteContext, "remote-context", "", "remote context (default: last TUI selection, last lift target, configured context, or first remote)")
 	cmd.Flags().StringVar(&opt.Namespace, "namespace", app.OrkaNamespace, "Orka namespace to display")
+	cmd.Flags().StringVar(&opt.Bundles, "bundles", "", "directory holding one agent bundle per agent, compared by b (default: agents)")
 	cmd.Flags().BoolVar(&opt.Demo, "demo", false, "use sample agents; no cluster or cloud operations")
 	_ = cmd.RegisterFlagCompletionFunc("local-context", completeContexts)
 	_ = cmd.RegisterFlagCompletionFunc("remote-context", completeContexts)
