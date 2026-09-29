@@ -36,14 +36,23 @@ func goldenNoTaskCreate(out string) CreateOptions {
 // same order, with the same provenance header — so a diff here is the seam
 // changing output, which this port is not allowed to do.
 func TestOrkaNoTaskArtifactMatchesGolden(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sample.yaml")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.yaml")
 	var out, errOut bytes.Buffer
 	a := &App{
 		Cfg: &config.Config{KubeContext: "kind-test"},
 		Run: &run.Runner{Stdout: &out, Stderr: &errOut}, Out: &out, Err: &errOut,
 	}
-	if err := a.CreateAgent(goldenNoTaskCreate(path)); err != nil {
+	// Create writes a portable bundle beside the artifact. Without an explicit
+	// path it defaults to agents/<name> under the working directory, which
+	// in a test is this package's source directory.
+	opt := goldenNoTaskCreate(path)
+	opt.BundlePath = filepath.Join(dir, "agents", "sample")
+	if err := a.CreateAgent(opt); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(opt.BundlePath, "agent.yaml")); err != nil {
+		t.Fatalf("the bundle was not written where the test put it: %v", err)
 	}
 	got, err := os.ReadFile(path)
 	if err != nil {
