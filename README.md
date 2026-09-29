@@ -39,7 +39,15 @@ and [lifecycle direction](https://github.com/kaimahi-agents/kaimahi/issues/194).
 
 ## Quickstart
 
-Install Docker, then use the checksum-verified release installer:
+Install Docker, then install the stable CLI with Homebrew and run that exact
+binary:
+
+```bash
+brew install kaimahi-agents/tap/kmx && "$(brew --prefix kaimahi-agents/tap/kmx)/bin/kmx" quickstart
+```
+
+The fully qualified formula trusts only `kmx`, not every future item in the
+tap. If Homebrew is unavailable, use the checksum-verified release installer:
 
 ```bash
 (

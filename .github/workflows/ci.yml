@@ -178,10 +178,12 @@ jobs:
       # tested here rather than discovered on a tag.
       - name: Release-notes extractor self-test
         run: python3 scripts/release-notes.py --selftest
+      - name: Homebrew formula renderer self-test
+        run: python3 scripts/homebrew-formula.py --selftest
       - name: The unreleased section exists, and the release job stays keyless
         run: |
           python3 - <<'EOF'
-          import re, sys, yaml
+          import os, re, subprocess, sys, tempfile, yaml
           changelog = open("CHANGELOG.md").read()
           if not re.search(r"^## Unreleased$", changelog, re.M):
               print("CHANGELOG.md needs an '## Unreleased' section to write the next release into")
@@ -201,12 +203,42 @@ jobs:
           if wf.get("permissions") != {"contents": "read"}:
               print(f"release.yml must default to contents: read, got {wf.get('permissions')}")
               sys.exit(1)
+          release_text = open(".github/workflows/release.yml").read()
+          if "scripts/homebrew-formula.py" not in release_text or '"$RUNNER_TEMP/dist/kmx.rb"' not in release_text:
+              print("release.yml must generate and publish the Homebrew formula from release checksums")
+              sys.exit(1)
+          if 'if [ "$EVENT_NAME" = push ] && [ "$REF_TYPE" = tag ]; then' not in release_text:
+              print("release.yml must publish only for tag pushes; manual dispatch is always a dry run")
+              sys.exit(1)
+          decide = next(step["run"] for step in wf["jobs"]["release"]["steps"] if step.get("id") == "what")
+          cases = [
+              ({"EVENT_NAME": "push", "REF_TYPE": "tag", "REF_NAME": "v0.3.0", "INPUT_VERSION": "", "SHA": "a" * 40},
+               {"version": "v0.3.0", "dry_run": "false", "prerelease": "false", "synthetic": "false"}),
+              ({"EVENT_NAME": "push", "REF_TYPE": "tag", "REF_NAME": "v0.3.0-rc.1", "INPUT_VERSION": "", "SHA": "d" * 40},
+               {"version": "v0.3.0-rc.1", "dry_run": "false", "prerelease": "true", "synthetic": "false"}),
+              ({"EVENT_NAME": "workflow_dispatch", "REF_TYPE": "branch", "REF_NAME": "main", "INPUT_VERSION": "v0.3.0", "SHA": "b" * 40},
+               {"version": "v0.3.0", "dry_run": "true", "prerelease": "false", "synthetic": "false"}),
+              ({"EVENT_NAME": "workflow_dispatch", "REF_TYPE": "tag", "REF_NAME": "v0.3.0", "INPUT_VERSION": "", "SHA": "c" * 40},
+               {"version": "v0.0.0-dryrun.cccccccccccc", "dry_run": "true", "prerelease": "true", "synthetic": "true"}),
+          ]
+          for env_add, expected in cases:
+              with tempfile.NamedTemporaryFile() as output:
+                  env = dict(os.environ, GITHUB_OUTPUT=output.name, **env_add)
+                  run = subprocess.run(["bash", "-c", decide], env=env, text=True, capture_output=True)
+                  if run.returncode:
+                      print(run.stdout, run.stderr, sep="\n", file=sys.stderr)
+                      sys.exit(run.returncode)
+                  output.seek(0)
+                  got = dict(line.decode().rstrip().split("=", 1) for line in output if b"=" in line)
+              if any(got.get(key) != value for key, value in expected.items()):
+                  print(f"release decision mismatch for {env_add}: got {got}, want {expected}")
+                  sys.exit(1)
           for name, job in wf["jobs"].items():
               extra = set(job.get("permissions", {})) - {"contents"}
               if extra:
                   print(f"release job {name} asks for more than contents: {sorted(extra)}")
                   sys.exit(1)
-          print("release workflow: no repository secrets, contents-only permissions, changelog ready")
+          print("release workflow: dry-run matrix, no repository secrets, contents-only permissions, changelog ready")
           EOF
       # The context guard is pure policy — every branch of it decides
       # whether to touch somebody's cluster — but the e2e job below can only

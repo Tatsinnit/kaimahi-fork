@@ -15,6 +15,8 @@ spec.loader.exec_module(front_door)
 JOURNEY = """kmx agent create
 kmx agent lift
 """
+HOMEBREW = """brew install kaimahi-agents/tap/kmx && "$(brew --prefix kaimahi-agents/tap/kmx)/bin/kmx" quickstart
+"""
 QUICKSTART = """(
   installer=$(mktemp) || exit
   trap 'rm -f "$installer"' EXIT
@@ -34,6 +36,8 @@ GOOD = """<img src="brand/ketu.svg" alt="Kaimahi ketu mark">
 ```bash
 """ + JOURNEY + """```
 ## Quickstart
+```bash
+""" + HOMEBREW + """```
 ```bash
 """ + QUICKSTART + """```
 ```bash
@@ -81,6 +85,7 @@ for label, literal in [
 for label, literal in [
     ("kmx agent create", "kmx agent create\n"),
     ("kmx agent lift", "kmx agent lift\n"),
+    ("Homebrew quickstart", 'brew install kaimahi-agents/tap/kmx && "$(brew --prefix kaimahi-agents/tap/kmx)/bin/kmx" quickstart\n'),
     ("temporary installer", "  installer=$(mktemp) || exit\n"),
     ("installer cleanup", "  trap 'rm -f \"$installer\"' EXIT\n"),
     ("release installer", "  curl -fsSL https://raw.githubusercontent.com/kaimahi-agents/kaimahi/main/install.sh -o \"$installer\" || exit\n"),
@@ -96,6 +101,13 @@ for command, label in (("kmx agent create", "kmx agent create"),
                   f"{label} is missing"))
 
 CASES += [
+    ("Homebrew formula from wrong tap", GOOD.replace("kaimahi-agents/tap/kmx", "other/tap/kmx"),
+     "Homebrew quickstart is missing"),
+    ("bare Homebrew formula", GOOD.replace("kaimahi-agents/tap/kmx", "kmx"),
+     "Homebrew quickstart is missing"),
+    ("Homebrew install can run stale PATH binary", GOOD.replace(HOMEBREW,
+     "brew install kaimahi-agents/tap/kmx && kmx quickstart\n"),
+     "Homebrew quickstart is missing"),
     ("installer from wrong repository", GOOD.replace("kaimahi/main/install.sh", "other/main/install.sh"),
      "release installer is missing"),
     ("unverified direct binary", GOOD.replace("https://raw.githubusercontent.com/kaimahi-agents/kaimahi/main/install.sh", "https://example.com/kmx"),
@@ -124,20 +136,24 @@ CASES += [
     ("empty document", "", "ketu icon is missing"),
     ("journey commands only in prose", GOOD.replace("```bash\n" + JOURNEY + "```", JOURNEY),
      "create/prove/lift has no fenced command block"),
-    ("quickstart commands only in prose", GOOD.replace("```bash\n" + QUICKSTART + "```", QUICKSTART),
-     "quickstart subshell is missing"),
+    ("Homebrew command only in prose", GOOD.replace("```bash\n" + HOMEBREW + "```", HOMEBREW),
+     "Homebrew quickstart is missing"),
     ("empty journey first block", GOOD.replace("```bash\n", "```bash\n```\n```bash\n", 1),
      "kmx agent create is missing"),
-    ("empty quickstart first block", GOOD.replace("```bash\n" + QUICKSTART, "```bash\n```\n```bash\n" + QUICKSTART),
-     "quickstart subshell is missing"),
+    ("empty quickstart first block", GOOD.replace("```bash\n" + HOMEBREW, "```bash\n```\n```bash\n" + HOMEBREW),
+     "Homebrew quickstart is missing"),
     ("quickstart commands only in a later section",
-     GOOD.replace(QUICKSTART, "kmx version\n").replace("## Status", "```bash\n" + QUICKSTART + "```\n## Status"),
-     "quickstart subshell is missing"),
+     GOOD.replace(HOMEBREW, "kmx version\n").replace("## Status", "```bash\n" + HOMEBREW + "```\n## Status"),
+     "Homebrew quickstart is missing"),
     ("journey commands out of order", GOOD.replace("kmx agent create\nkmx agent lift", "kmx agent lift\nkmx agent create"),
      "kmx agent lift is missing"),
     ("quickstart commands out of order", GOOD.replace(QUICKSTART,
      '  sh "$installer" --quickstart\n' + QUICKSTART.replace('  sh "$installer" --quickstart\n', '')),
      "installed kmx quickstart is missing"),
+    ("install alternatives out of order", GOOD.replace(
+     "```bash\n" + HOMEBREW + "```\n```bash\n" + QUICKSTART + "```",
+     "```bash\n" + QUICKSTART + "```\n```bash\n" + HOMEBREW + "```"),
+     "Homebrew quickstart is missing"),
     ("command inside prose", GOOD.replace('  sh "$installer" --quickstart\n', '  Run sh "$installer" --quickstart first.\n'),
      "installed kmx quickstart is missing"),
     ("stray command before section", GOOD.replace("## Quickstart", "kmx quickstart\n## Quickstart"), None),
@@ -190,6 +206,45 @@ with tempfile.TemporaryDirectory() as tmp:
     print(("ok  " if ok else "FAIL") + f" [failed download stops and cleans up without running stale kmx] -> exit {got.returncode}")
     failed += not ok
 
+# A failed Homebrew install must stop before resolving or running any kmx, and
+# a successful one must use the installed formula's exact prefix rather than a
+# stale binary earlier on PATH.
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    bindir = root / "bin"
+    bindir.mkdir()
+    brew = bindir / "brew"
+    stale = bindir / "kmx"
+    stale.write_text("#!/bin/sh\nprintf stale > \"$HOME/stale-called\"\n")
+    stale.chmod(0o755)
+    env = dict(os.environ, HOME=tmp, PATH=f"{bindir}:{os.environ['PATH']}")
+
+    brew.write_text("#!/bin/sh\nexit 19\n")
+    brew.chmod(0o755)
+    got = subprocess.run(["sh", "-c", HOMEBREW], env=env, capture_output=True, text=True)
+    ok = got.returncode == 19 and not (root / "stale-called").exists()
+    print(("ok  " if ok else "FAIL") + f" [failed Homebrew install cannot run stale kmx] -> exit {got.returncode}")
+    failed += not ok
+
+    prefix = root / "cellar/kmx"
+    (prefix / "bin").mkdir(parents=True)
+    installed = prefix / "bin/kmx"
+    installed.write_text("#!/bin/sh\nprintf fresh > \"$HOME/fresh-called\"\n")
+    installed.chmod(0o755)
+    brew.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  install) [ \"$2\" = kaimahi-agents/tap/kmx ] || exit 2 ;;\n"
+        f"  --prefix) [ \"$2\" = kaimahi-agents/tap/kmx ] || exit 2; printf '%s\\n' {prefix!s} ;;\n"
+        "  *) exit 2 ;;\n"
+        "esac\n"
+    )
+    got = subprocess.run(["sh", "-c", HOMEBREW], env=env, capture_output=True, text=True)
+    ok = (got.returncode == 0 and (root / "fresh-called").read_text() == "fresh"
+          and not (root / "stale-called").exists())
+    print(("ok  " if ok else "FAIL") + f" [Homebrew install runs its exact prefix, not PATH's stale kmx] -> exit {got.returncode}")
+    failed += not ok
+
 # A failed Go install must not invoke an older kmx earlier on PATH.
 with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
@@ -213,5 +268,5 @@ with tempfile.TemporaryDirectory() as tmp:
     print(("ok  " if ok else "FAIL") + f" [successful Go install runs its own binary, not PATH's stale kmx] -> exit {got.returncode}")
     failed += not ok
 
-print(f"check-readme-front-door self-test: {len(CASES) + 5} case(s), {failed} failure(s)")
+print(f"check-readme-front-door self-test: {len(CASES) + 7} case(s), {failed} failure(s)")
 sys.exit(1 if failed else 0)

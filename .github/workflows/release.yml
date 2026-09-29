@@ -7,7 +7,8 @@ name: release
 # the GITHUB_TOKEN GitHub mints for the run, scoped to `contents: write`
 # because creating a release IS a write to this repository's contents. No
 # repository secret is added, and none is needed: nothing is pushed to a
-# package registry, a container registry or a Homebrew tap.
+# package registry, a container registry or a Homebrew tap. The release carries
+# the formula as an asset; a reviewed tap PR validates and publishes it.
 on:
   push:
     tags: ["v*"]
@@ -47,6 +48,7 @@ jobs:
         env:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
           INPUT_VERSION: ${{ inputs.version }}
           SHA: ${{ github.sha }}
         run: |
@@ -57,7 +59,7 @@ jobs:
           # release" from "rehearse the machinery" — v0.0.0-dryrun.<sha> has
           # no changelog section and never will.
           synthetic=false
-          if [ "$REF_TYPE" = tag ]; then
+          if [ "$EVENT_NAME" = push ] && [ "$REF_TYPE" = tag ]; then
             version="$REF_NAME"
             dry_run=false
           elif [ -n "$INPUT_VERSION" ]; then
@@ -71,7 +73,7 @@ jobs:
           # Semantic, pre-1.0, `v`-prefixed: what `go install …@<version>`
           # and the Go module proxy accept. A tag this pattern does not
           # match must not produce binaries claiming to be a version.
-          if ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+          if ! python3 scripts/homebrew-formula.py --check-version "$version"; then
             echo "refusing to build '$version': not a semantic v<major>.<minor>.<patch>[-prerelease] version" >&2
             exit 1
           fi
@@ -248,6 +250,17 @@ jobs:
           # anyone downloads anything.
           sha256sum --ignore-missing -c checksums.txt
 
+      - name: Homebrew formula
+        env:
+          VERSION: ${{ steps.what.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 scripts/homebrew-formula.py "$VERSION" \
+            "$RUNNER_TEMP/dist/checksums.txt" \
+            --output "$RUNNER_TEMP/dist/kmx.rb"
+          ruby -c "$RUNNER_TEMP/dist/kmx.rb"
+          test -s "$RUNNER_TEMP/dist/kmx.rb"
+
       - name: Publish the release
         if: steps.what.outputs.dry_run == 'false'
         env:
@@ -259,7 +272,8 @@ jobs:
           flags=(--title "$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --verify-tag)
           if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
           gh release create "$VERSION" "${flags[@]}" \
-            "$RUNNER_TEMP"/dist/kmx-* "$RUNNER_TEMP/dist/checksums.txt"
+            "$RUNNER_TEMP"/dist/kmx-* "$RUNNER_TEMP/dist/checksums.txt" \
+            "$RUNNER_TEMP/dist/kmx.rb"
 
       # A dry run publishes nothing; the artifacts are how its output is
       # inspected (and how a clean machine can be handed the exact bytes a

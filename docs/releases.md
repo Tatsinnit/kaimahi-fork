@@ -10,8 +10,10 @@ option. Orka's own installation and upgrade limits are separate: see
 [orka.md](orka.md).
 The plane-upgrade sections below apply only to the retained legacy plane.
 
-Nothing here claims a trademark or a package-manager namespace. The name's
-publication constraints remain in [NAMING.md](NAMING.md).
+The official Homebrew namespace is limited to the public
+`kaimahi-agents/homebrew-tap` repository and its `kmx` formula. No trademark is
+claimed; the remaining publication constraints are recorded in
+[NAMING.md](NAMING.md).
 
 ## Versions
 
@@ -41,6 +43,28 @@ kmx's own version, and Go resolves a nested module's version from a
 `plane/`-prefixed tag. The release job refuses to publish without it.
 
 ## Install
+
+With Homebrew on macOS or Linux:
+
+```bash
+brew install kaimahi-agents/tap/kmx
+```
+
+The fully qualified name automatically adds the tap and trusts only this
+formula. It installs the same four binaries and SHA-256 values published by the
+GitHub release. The formula checksum detects a changed or truncated download;
+like `install.sh`, it is not an independent signature because both originate in
+the same release. Docker or Podman remains required for local kind workflows,
+and `kmx plane` still needs Go.
+
+Upgrade the stable formula with:
+
+```bash
+brew upgrade kaimahi-agents/tap/kmx
+```
+
+The tap follows stable releases only. Use the versioned installer or pinned Go
+route below when you need an older release or a prerelease.
 
 The one-line installer for the latest **tagged** CLI:
 
@@ -337,9 +361,26 @@ than the first.
 4. Watch the `release` workflow. It refuses to publish if: the version is not
    semantic, `plane/vX.Y.Z` is missing or points somewhere else, the changelog
    has no section, the built binary does not report the tag, or the checksums
-   do not verify.
-5. Check the result: `go install …/cmd/kmx@vX.Y.Z && kmx version`.
+   do not verify. The release also carries `kmx.rb`, rendered from those exact
+   checksums. For a stable release, download that exact asset and submit it as
+   the formula change in the official tap:
+
+   ```bash
+   formula=$(mktemp)
+   gh release download vX.Y.Z --repo kaimahi-agents/kaimahi \
+     --pattern kmx.rb --output "$formula" --clobber
+   mv "$formula" Formula/kmx.rb
+   ```
+
+5. Open a pull request to `kaimahi-agents/homebrew-tap`; merge it only after
+   review and the tap's macOS and Linux formula checks pass. Prerelease formula
+   assets are inspection evidence and do not replace the stable formula.
+6. Check the result with both routes: `go install …/cmd/kmx@vX.Y.Z && kmx version`,
+   then `brew install kaimahi-agents/tap/kmx && "$(brew --prefix kaimahi-agents/tap/kmx)/bin/kmx" version`
+   on a clean Homebrew installation.
 
 To rehearse without spending a version number, run the `release` workflow
 manually (`workflow_dispatch`) from a branch: it builds and checksums exactly
-the same artifacts, publishes nothing, and uploads them as workflow artifacts.
+the same artifacts, renders the candidate formula, publishes nothing, and
+uploads them as workflow artifacts. Prereleases publish their own formula asset
+for inspection but never replace the tap's stable formula.

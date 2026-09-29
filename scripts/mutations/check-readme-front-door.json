@@ -53,6 +53,18 @@
       "replace": "    (\"runtime ownership note\", r\"\"),"
     },
     {
+      "name": "the Homebrew formula check accepts any tap",
+      "breaks": "The front door can install an unowned formula and still pass.",
+      "find": "^brew install kaimahi-agents/tap/kmx && \"\\$\\(brew --prefix kaimahi-agents/tap/kmx\\)/bin/kmx\" quickstart$",
+      "replace": "^brew install .* && .* quickstart$"
+    },
+    {
+      "name": "the Homebrew command list is emptied",
+      "breaks": "Any first Quickstart block can satisfy setup without installing the owned formula.",
+      "find": "HOMEBREW_COMMANDS = [\n",
+      "replace": "HOMEBREW_COMMANDS = []\nUNUSED_HOMEBREW_COMMANDS = [\n"
+    },
+    {
       "name": "the quickstart subshell boundary is ignored",
       "breaks": "A failed download can exit the reader's shell rather than only the setup snippet.",
       "find": "    (\"quickstart subshell\", r\"^\\($\"),",
