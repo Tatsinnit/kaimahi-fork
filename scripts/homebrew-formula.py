@@ -75,6 +75,9 @@ def validate_asset_base(asset_base: str) -> str:
 def render_formula(tag: str, checksums: dict[str, str], asset_base: str) -> str:
     version = release_version(tag)
     asset_base = validate_asset_base(asset_base)
+    default_asset_base = (
+        "https://github.com/kaimahi-agents/kaimahi/releases/download/" + tag
+    )
     missing = sorted(ASSET_NAMES - checksums.keys())
     extra = sorted(checksums.keys() - ASSET_NAMES)
     if missing or extra:
@@ -97,7 +100,10 @@ def render_formula(tag: str, checksums: dict[str, str], asset_base: str) -> str:
         '  desc "Agent Builder CLI for Kubernetes"',
         '  homepage "https://github.com/kaimahi-agents/kaimahi"',
     ]
-    if "-" in tag:
+    # Stable production URLs let Homebrew infer the version, and strict audit
+    # rejects restating it. Prereleases confuse URL inference, while a custom
+    # base may carry no version at all, so those cases must be explicit.
+    if "-" in tag or asset_base != default_asset_base:
         lines.append(f'  version "{version}"')
     lines.extend(['  license "MIT"', ""])
     current_os = None
@@ -202,6 +208,17 @@ def selftest() -> int:
 
     check("hyphens inside prerelease identifiers are accepted",
           release_version("v1.2.3-x--y") == "1.2.3-x--y")
+    stable_formula = render_formula(
+        "v1.2.3", checksums,
+        "https://github.com/kaimahi-agents/kaimahi/releases/download/v1.2.3",
+    )
+    check("stable release URLs use Homebrew's audited version inference",
+          '  version "' not in stable_formula)
+    custom_formula = render_formula(
+        "v1.2.3", checksums, "https://example.invalid/releases"
+    )
+    check("stable custom asset bases carry an explicit version",
+          'version "1.2.3"' in custom_formula)
     for bad_version in (
         "1.2.3", "v1.2", "v1.2.3/../../tap", "v01.2.3", "v1.2.3-01",
     ):

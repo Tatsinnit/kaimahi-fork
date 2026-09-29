@@ -376,8 +376,8 @@ than the first.
    review and the tap's macOS and Linux formula checks pass. Prerelease formula
    assets are inspection evidence and do not replace the stable formula.
 6. Check the result with both routes: `go install …/cmd/kmx@vX.Y.Z && kmx version`,
-   then `brew upgrade kaimahi-agents/tap/kmx && kmx version` on a clean Homebrew
-   installation.
+   then `brew install kaimahi-agents/tap/kmx && "$(brew --prefix kaimahi-agents/tap/kmx)/bin/kmx" version`
+   on a clean Homebrew installation.
 
 To rehearse without spending a version number, run the `release` workflow
 manually (`workflow_dispatch`) from a branch: it builds and checksums exactly
