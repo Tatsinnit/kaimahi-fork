@@ -23,59 +23,39 @@ move it into a real environment without learning each runtime's manifests first.
 
 ## Create, Prove, Lift
 
+Install Docker or Podman (set `CONTAINER_ENGINE=podman` for Podman), then
+choose one CLI install route (Go requires 1.26+):
+
 ```bash
-kmx agent create
-kmx agent lift
+brew install kaimahi-agents/tap/kmx
+# or
+curl -fsSL https://raw.githubusercontent.com/kaimahi-agents/kaimahi/main/install.sh | sh
+# or
+go install github.com/kaimahi-agents/kaimahi/cmd/kmx@v0.3.0
 ```
 
-`create` is the path from an idea to an editable local agent. `lift` is the path
-from "it works here" to a selected Kubernetes or AKS environment. KMX keeps the
-target and changes explicit while the runtime handles execution.
+With `kmx` on your PATH, run the first-answer path:
 
-`kmx agent create` authors a bundle on a prepared target. `kmx agent lift`
-deploys that bundle to a prepared Orka target; `/lift` remains the
-interactive path from a live Agent. See the [bundle lift guide](docs/agent-lift.md)
-and [lifecycle direction](https://github.com/kaimahi-agents/kaimahi/issues/194).
+```bash
+kmx quickstart
+```
+
+`kmx quickstart` provisions local kind and Orka and runs a fixed Agent's fresh Task.
+`kmx up` provisions the local runtime without creating an Agent.
+`kmx quickstart-wizard` helps you create your own Agent interactively.
+`kmx agent create` writes an editable bundle on a prepared target.
+`kmx agent lift` deploys that bundle to a prepared Orka target.
+`kmx agent status` reads its revision, readiness, drift and evaluation result.
+`kmx agent evaluate` runs the bundle's cases against that deployed revision.
+See the [bundle lift guide](docs/agent-lift.md) for the create example, target
+preparation, receipts and evaluation boundaries; `/lift` remains the separate
+interactive path from a live Agent.
 
 ## Quickstart
 
-Install Docker, then install the stable CLI with Homebrew and run that exact
-binary:
-
-```bash
-brew install kaimahi-agents/tap/kmx &&
-  kmx_prefix="$(brew --prefix kaimahi-agents/tap/kmx)" &&
-  "$kmx_prefix/bin/kmx" quickstart
-```
-
-The fully qualified formula trusts only `kmx`, not every future item in the
-tap. If Homebrew is unavailable, use the checksum-verified release installer:
-
-```bash
-(
-  installer=$(mktemp) || exit
-  trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/kaimahi-agents/kaimahi/main/install.sh -o "$installer" || exit
-  sh "$installer" --quickstart
-)
-```
-
-A failed download stops before running any installed binary; the temporary
-script is removed after quickstart. On a Podman-only machine, replace the
-last `sh "$installer" --quickstart` with
-`CONTAINER_ENGINE=podman sh "$installer" --quickstart`.
-
-Or, with Go 1.26+, build the same release and run that exact binary:
-
-```bash
-GOBIN="$HOME/.local/bin" go install github.com/kaimahi-agents/kaimahi/cmd/kmx@v0.2.0 && "$HOME/.local/bin/kmx" quickstart
-```
-
-`kmx quickstart` is a non-interactive Orka path through local kind, Ollama,
-Provider, Agent and a fresh Task to a readable answer. `kmx up` provisions the
-runtime without creating an agent. To choose your own model and agent
-interactively, run `kmx quickstart-wizard`; it prepares a local Kubernetes
-target while you describe the agent. To complete the wizard journey:
+The fixed first-answer path uses local kind, Ollama, Provider and Agent.
+The wizard prepares a local Kubernetes target while you describe your own agent.
+To complete the wizard journey:
 
 1. Choose **Chat with agent** when setup is ready.
 2. Send a prompt and wait for an answer to prove the selected execution path.
@@ -102,7 +82,7 @@ Use Podman explicitly with:
 kmx --container-engine podman quickstart-wizard
 ```
 
-`@main` remains the moving development option; use `@v0.2.0` for this release.
+`@main` remains the moving development option; use `@v0.3.0` for this release.
 From a checkout, `make` builds `bin/kmx` without provisioning anything.
 
 ## Runtime Contract
@@ -137,15 +117,11 @@ admission without cluster writes. Read the complete
 
 ## Lifecycle
 
-The simple front door does not remove deeper lifecycle needs. The direction in
-[#194](https://github.com/kaimahi-agents/kaimahi/issues/194) includes Git-tracked
-agent definitions, immutable revision digests, deployment receipts, evaluation,
-target-aware status, diff, and rollback.
-
-Those operations do not have full standalone command parity on `main`. The
-initial state model should use Git and the selected runtime rather than introduce
-a second KMX server or controller. Rollback means deploying and verifying an
-earlier revision; it cannot undo external actions already completed by an agent.
+Bundles, lift receipts, revision-aware status and evaluation are available as
+standalone commands. The [lifecycle direction](https://github.com/kaimahi-agents/kaimahi/issues/194)
+also discusses rollback, which does not have a standalone command. Deploying
+and verifying an earlier revision cannot undo an agent's completed external
+actions. KMX uses Git and the selected runtime rather than a separate server.
 
 ## Migrate Model Traffic
 
@@ -167,7 +143,7 @@ limits.
 Kaimahi is pre-1.0 and incubating. Interactive local creation, creation on the
 first-class runtime, inspection, chat, bundle lift and interactive lift to an
 existing target, AKS platform provisioning, and model-traffic migration are
-implemented. The complete lifecycle remains directional. The legacy runtime's
+implemented. Rollback remains directional. The legacy runtime's
 commands are retired; the model-traffic bridge (`kmx plane`, `kmx migrate`) remains.
 AKS paths use billable resources and are not continuously re-proved in CI.
 
