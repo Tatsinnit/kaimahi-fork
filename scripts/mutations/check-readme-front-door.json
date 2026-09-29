@@ -55,8 +55,14 @@
     {
       "name": "the Homebrew formula check accepts any tap",
       "breaks": "The front door can install an unowned formula and still pass.",
-      "find": "^brew install kaimahi-agents/tap/kmx && \"\\$\\(brew --prefix kaimahi-agents/tap/kmx\\)/bin/kmx\" quickstart$",
-      "replace": "^brew install .* && .* quickstart$"
+      "find": "^brew install kaimahi-agents/tap/kmx &&$",
+      "replace": "^brew install .* &&$"
+    },
+    {
+      "name": "the Homebrew prefix check accepts any location",
+      "breaks": "A failed or unrelated prefix lookup can select a binary outside the owned formula.",
+      "find": "^  kmx_prefix=\"\\$\\(brew --prefix kaimahi-agents/tap/kmx\\)\" &&$",
+      "replace": "^  kmx_prefix=.* &&$"
     },
     {
       "name": "the Homebrew command list is emptied",

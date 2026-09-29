@@ -38,6 +38,7 @@ BASE_RE = re.compile(r"^(?:https?|file)://[A-Za-z0-9._~:/%+-]+$")
 
 
 def release_version(tag: str) -> str:
+    """Return a tag's Homebrew version after strict SemVer validation."""
     if not VERSION_RE.fullmatch(tag):
         raise ValueError(
             f"version {tag!r} is not v<major>.<minor>.<patch>[-prerelease]"
@@ -46,6 +47,7 @@ def release_version(tag: str) -> str:
 
 
 def parse_checksums(text: str) -> dict[str, str]:
+    """Read exactly one SHA-256 for each published kmx binary asset."""
     checksums: dict[str, str] = {}
     for line_number, line in enumerate(text.splitlines(), 1):
         if not line.strip():
@@ -66,6 +68,7 @@ def parse_checksums(text: str) -> dict[str, str]:
 
 
 def validate_asset_base(asset_base: str) -> str:
+    """Accept a URL base that is safe to embed in a Ruby string literal."""
     asset_base = asset_base.rstrip("/")
     if not BASE_RE.fullmatch(asset_base):
         raise ValueError("asset base must be one http(s) or file URL without quoting")
@@ -73,6 +76,7 @@ def validate_asset_base(asset_base: str) -> str:
 
 
 def render_formula(tag: str, checksums: dict[str, str], asset_base: str) -> str:
+    """Render one deterministic Homebrew formula from validated release data."""
     version = release_version(tag)
     asset_base = validate_asset_base(asset_base)
     default_asset_base = (
@@ -146,6 +150,7 @@ def render_formula(tag: str, checksums: dict[str, str], asset_base: str) -> str:
 
 
 def write_formula(path: Path, formula: str) -> None:
+    """Atomically replace the requested formula output file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + f".tmp.{os.getpid()}")
     try:
@@ -159,6 +164,7 @@ def write_formula(path: Path, formula: str) -> None:
 
 
 def selftest() -> int:
+    """Exercise accepted output and every fail-closed input boundary."""
     failed = 0
     fixture = "\n".join(
         f"{index:064x}  kmx-{os_name}-{arch}"
@@ -242,6 +248,7 @@ def selftest() -> int:
 
 
 def main(argv: list[str]) -> int:
+    """Parse the command line and render, validate, or self-test."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version", nargs="?")
     parser.add_argument("checksums", nargs="?", type=Path)

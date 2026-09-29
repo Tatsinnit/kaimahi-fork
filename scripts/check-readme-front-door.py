@@ -39,7 +39,9 @@ JOURNEY_COMMANDS = [
 # file because a pipeline can hide curl's failure and launch a stale installed
 # kmx; the third block pins the source-build route.
 HOMEBREW_COMMANDS = [
-    ("Homebrew quickstart", r'^brew install kaimahi-agents/tap/kmx && "\$\(brew --prefix kaimahi-agents/tap/kmx\)/bin/kmx" quickstart$'),
+    ("Homebrew install", r"^brew install kaimahi-agents/tap/kmx &&$"),
+    ("Homebrew prefix", r'^  kmx_prefix="\$\(brew --prefix kaimahi-agents/tap/kmx\)" &&$'),
+    ("Homebrew quickstart", r'^  "\$kmx_prefix/bin/kmx" quickstart$'),
 ]
 QUICKSTART_COMMANDS = [
     ("quickstart subshell", r"^\($"),

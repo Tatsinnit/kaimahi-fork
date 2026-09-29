@@ -51,8 +51,9 @@ brew install kaimahi-agents/tap/kmx
 ```
 
 The fully qualified name automatically adds the tap and trusts only this
-formula. It installs the same four binaries and SHA-256 values published by the
-GitHub release. The formula checksum detects a changed or truncated download;
+formula. It selects the matching one of the four release binaries for the
+current OS and architecture, then verifies that asset's published SHA-256. The
+formula checksum detects a changed or truncated download;
 like `install.sh`, it is not an independent signature because both originate in
 the same release. Docker or Podman remains required for local kind workflows,
 and `kmx plane` still needs Go.
@@ -366,18 +367,27 @@ than the first.
    the formula change in the official tap:
 
    ```bash
+   tap=$(mktemp -d)
+   git clone https://github.com/kaimahi-agents/homebrew-tap.git "$tap"
    formula=$(mktemp)
    gh release download vX.Y.Z --repo kaimahi-agents/kaimahi \
      --pattern kmx.rb --output "$formula" --clobber
-   mv "$formula" Formula/kmx.rb
+   mv "$formula" "$tap/Formula/kmx.rb"
+   cd "$tap"
    ```
 
-5. Open a pull request to `kaimahi-agents/homebrew-tap`; merge it only after
-   review and the tap's macOS and Linux formula checks pass. Prerelease formula
-   assets are inspection evidence and do not replace the stable formula.
+5. From that tap checkout, create a branch, commit `Formula/kmx.rb`, and open a
+   pull request to `kaimahi-agents/homebrew-tap`. Merge it only after review and
+   the tap's macOS and Linux formula checks pass. Prerelease formula assets are
+   inspection evidence and do not replace the stable formula.
 6. Check the result with both routes: `go install …/cmd/kmx@vX.Y.Z && kmx version`,
-   then `brew install kaimahi-agents/tap/kmx && "$(brew --prefix kaimahi-agents/tap/kmx)/bin/kmx" version`
-   on a clean Homebrew installation.
+   then the following on a clean Homebrew installation:
+
+   ```bash
+   brew install kaimahi-agents/tap/kmx &&
+     kmx_prefix="$(brew --prefix kaimahi-agents/tap/kmx)" &&
+     "$kmx_prefix/bin/kmx" version
+   ```
 
 To rehearse without spending a version number, run the `release` workflow
 manually (`workflow_dispatch`) from a branch: it builds and checksums exactly

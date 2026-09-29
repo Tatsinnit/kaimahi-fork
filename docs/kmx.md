@@ -20,7 +20,9 @@ Orka's platform in Kaimahi.
 The stable release is available through the official Homebrew tap:
 
 ```bash
-brew install kaimahi-agents/tap/kmx && "$(brew --prefix kaimahi-agents/tap/kmx)/bin/kmx" version
+brew install kaimahi-agents/tap/kmx &&
+  kmx_prefix="$(brew --prefix kaimahi-agents/tap/kmx)" &&
+  "$kmx_prefix/bin/kmx" version
 ```
 
 The fully qualified formula trusts only `kmx`. Homebrew installs the CLI, not

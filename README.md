@@ -43,7 +43,9 @@ Install Docker, then install the stable CLI with Homebrew and run that exact
 binary:
 
 ```bash
-brew install kaimahi-agents/tap/kmx && "$(brew --prefix kaimahi-agents/tap/kmx)/bin/kmx" quickstart
+brew install kaimahi-agents/tap/kmx &&
+  kmx_prefix="$(brew --prefix kaimahi-agents/tap/kmx)" &&
+  "$kmx_prefix/bin/kmx" quickstart
 ```
 
 The fully qualified formula trusts only `kmx`, not every future item in the
