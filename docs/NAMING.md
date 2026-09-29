@@ -3,9 +3,12 @@
 Working notes on the project name: what has been proposed, what is actually
 available, and what is still owed before any name is treated as final.
 
-**One thing here is now claimed.** A GitHub organization named for the
-project, `kaimahi-agents`, exists and hosts the repo (2026-09-01). No
-package or domain has been registered. An organization name is a public
+**Two things here are now claimed.** A GitHub organization named for the
+project, `kaimahi-agents`, exists and hosts the repo (2026-09-01). The public
+repository `kaimahi-agents/homebrew-tap` and its Homebrew formula `kmx` were
+explicitly approved and created on 2026-09-29; the short tap name is
+`kaimahi-agents/tap`. No other package or domain has been registered. An
+organization or package name is a public
 claim on a name that is still provisional — a stronger one than the repo
 rename was — and at the time it was made both gates set on the name (a
 cultural read and trademark counsel) were still open, which made them more

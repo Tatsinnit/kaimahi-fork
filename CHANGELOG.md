@@ -24,6 +24,7 @@ to do. Sections: **Added**, **Changed**, **Fixed**, **Breaking**, **Upgrading**.
 
 ### Added
 
+- Homebrew installation through the official `kaimahi-agents/tap` tap: `brew install kaimahi-agents/tap/kmx`. The formula installs the existing checksummed release binaries on macOS and Linux, on Intel and ARM; no second binary build or bottle is introduced. Stable releases publish a generated `kmx.rb` asset for a reviewed tap PR, while dry runs and prereleases do not update the stable formula.
 - `kmx agent evaluate <bundle-dir>` runs the bundle's `eval/*.yaml` cases (strictly decoded `id`, `input`, `expectContains`) as one Orka Task each against the deployed revision, and only when the live Agent carries the bundle's current portable digest. Each case is pass, fail or unknown and is never retried; answers are printed, and `receipts/eval-<target>.json` records the portable digest, a case-set digest, the target and per-case Task identity and answer SHA-256, never answer text. It exits non-zero unless every case passed. The Orka lifecycle adapter now implements `Evaluate`.
 - `kmx agent status` shows each target's evaluation result for the current digest and case set: `pass`, `fail`, `unknown` or `none`.
 - `kmx agent create` scaffolds `eval/example.yaml` in a new bundle, and bundle reruns accept an `eval/` directory.

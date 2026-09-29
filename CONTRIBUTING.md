@@ -32,6 +32,7 @@ python3 scripts/check-mutations.py
 python3 scripts/check-readme-front-door.py
 python3 scripts/check-readme-front-door-test.py
 python3 scripts/check-brand-assets.py
+python3 scripts/homebrew-formula.py --selftest
 bash scripts/check-no-azure-ids-test.sh && bash scripts/check-no-azure-ids.sh
 bash scripts/kube-guard-test.sh
 test -z "$(gofmt -l cmd internal embed.go embed_test.go)" && go vet ./... && go test ./...

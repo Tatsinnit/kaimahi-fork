@@ -32,8 +32,14 @@ Choose Podman directly on the command line with
 
 ## Current Orka path
 
-The v0.2.0 release includes these Orka commands. Install the pinned version
-with Go (or use the checksum-verified [release installer](releases.md#install)):
+The stable release includes these Orka commands. Install it with Homebrew:
+
+```bash
+brew install kaimahi-agents/tap/kmx
+```
+
+To pin v0.2.0 exactly, use Go or the checksum-verified
+[release installer](releases.md#install):
 
 ```bash
 go install github.com/kaimahi-agents/kaimahi/cmd/kmx@v0.2.0

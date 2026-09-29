@@ -35,8 +35,12 @@ JOURNEY_COMMANDS = [
     ("kmx agent create", r"^kmx agent create(?=[ \t]*(?:#.*)?$)"),
     ("kmx agent lift", r"^kmx agent lift(?=[ \t]*(?:#.*)?$)"),
 ]
-# Download to a temporary file first: a pipeline can hide curl's failure and
-# launch a stale installed kmx. The second block pins the source-build route.
+# Homebrew is the first route. The installer block downloads to a temporary
+# file because a pipeline can hide curl's failure and launch a stale installed
+# kmx; the third block pins the source-build route.
+HOMEBREW_COMMANDS = [
+    ("Homebrew quickstart", r'^brew install kaimahi-agents/tap/kmx && "\$\(brew --prefix kaimahi-agents/tap/kmx\)/bin/kmx" quickstart$'),
+]
 QUICKSTART_COMMANDS = [
     ("quickstart subshell", r"^\($"),
     ("temporary installer", r"^  installer=\$\(mktemp\) \|\| exit$"),
@@ -96,12 +100,17 @@ def check(text: str) -> str | None:
             blocks = quickstart_blocks(text, position)
             if not blocks:
                 return "README front door: Quickstart has no fenced command block"
-            missing = ordered_in(blocks[0], QUICKSTART_COMMANDS)
+            missing = ordered_in(blocks[0], HOMEBREW_COMMANDS)
             if missing is not None:
                 return f"README front door: {missing} is missing from the Quickstart command block"
             if len(blocks) < 2:
+                return "README front door: release installer is missing from the Quickstart command block"
+            missing = ordered_in(blocks[1], QUICKSTART_COMMANDS)
+            if missing is not None:
+                return f"README front door: {missing} is missing from the Quickstart command block"
+            if len(blocks) < 3:
                 return "README front door: pinned Go install is missing from the Quickstart command block"
-            missing = ordered_in(blocks[1], GO_INSTALL_COMMANDS)
+            missing = ordered_in(blocks[2], GO_INSTALL_COMMANDS)
             if missing is not None:
                 return f"README front door: {missing} is missing from the Quickstart command block"
     for label, pattern in BADGE_PATTERNS:
