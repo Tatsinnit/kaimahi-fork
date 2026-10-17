@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/workspace"
-	agentruntime "github.com/kaimahi-agents/kaimahi/internal/kmx/runtime"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/scaffold"
 )
 
@@ -19,6 +18,7 @@ type suiteCandidateOutcome struct {
 	phase, caseID, cleanupReason string
 	effects, allGone             bool
 	cause                        error
+	runs                         *suiteRunSummary
 }
 
 func (e *suiteCandidateOutcome) Unwrap() error { return e.cause }
@@ -32,18 +32,18 @@ func (e *suiteCandidateOutcome) Error() string {
 	}
 	if errors.Is(e.cause, errSuiteNativeCaseFailed) {
 		verdict = "native candidate evaluation case failed"
+		if e.runs != nil && e.runs.Aborted {
+			verdict = "native candidate execution failed"
+		}
 	}
 	var port *orkaResultPortError
 	if errors.As(e.cause, &port) {
 		verdict = port.Error()
 	}
-	cleanup := "candidate cleanup not required"
-	if e.allGone {
-		cleanup = "candidate cleanup completed"
-	} else if e.effects {
-		cleanup = "candidate cleanup incomplete; known resources may remain"
+	message := fmt.Sprintf("%s at %s; %s", verdict, e.phase, e.cleanup())
+	if e.runs != nil {
+		message = e.runs.String() + "; " + message
 	}
-	message := fmt.Sprintf("%s at %s; %s", verdict, e.phase, cleanup)
 	if !e.allGone && e.cleanupReason != "" {
 		message += "; " + e.cleanupReason
 	}
@@ -54,6 +54,16 @@ func (e *suiteCandidateOutcome) Error() string {
 		message += "; receipt publication incomplete; output may exist"
 	}
 	return message
+}
+
+func (e *suiteCandidateOutcome) cleanup() string {
+	if e.allGone {
+		return "candidate cleanup completed"
+	}
+	if e.effects {
+		return "candidate cleanup incomplete; known resources may remain"
+	}
+	return "candidate cleanup not required"
 }
 
 // Public Orka evaluation uses candidates; convenience callers stay canonical.
@@ -179,17 +189,14 @@ func (a *App) evaluateSuiteWorkspaceCandidate(ctx context.Context, p *PreparedSu
 		if err != nil {
 			return err
 		}
-		observations, err = evaluateSuiteRuns(ctx, p.inventory, p.options.CaseTimeout, worker.Out, func(runCtx context.Context, frame suitePassingInventoryCase) (suitePassingObservation, error) {
+		outcome.runs = &p.runs
+		observations, err = evaluateSuiteRunsReporting(ctx, p.inventory, p.options.CaseTimeout, worker.Out, func(runCtx context.Context, frame suitePassingInventoryCase) (suitePassingObservation, error) {
 			outcome.phase, outcome.caseID = "case execution", frame.Case.ID
 			if err := checkSource(runCtx); err != nil {
 				return suitePassingObservation{}, err
 			}
-			observed, err := worker.evaluateSuiteNativeCandidate(runCtx, placement, frame, p.options.ResultPort, p.judge, run)
-			if err == nil && suiteRunComplete(observed, frame) && suiteRunVerdict(observed.Assertions) == agentruntime.EvaluationPass {
-				p.liftPassed++
-			}
-			return observed, err
-		})
+			return worker.evaluateSuiteNativeCandidate(runCtx, placement, frame, p.options.ResultPort, p.judge, run)
+		}, &p.runs)
 		if err != nil {
 			return err
 		}
@@ -205,6 +212,7 @@ func (a *App) evaluateSuiteWorkspaceCandidate(ctx context.Context, p *PreparedSu
 	cleanupContextErr := cleanupCtx.Err() // Preserve deadline identity before releasing the context.
 	cancel()
 	outcome.allGone, outcome.cleanupReason = result.AllGone, result.Reason
+	p.cleanup = outcome.cleanup()
 	if cleanupErr != nil || !result.AllGone {
 		outcome.phase = "cleanup"
 		return errors.Join(executionErr, cleanupErr, cleanupContextErr, errSuiteCandidateCleanup)

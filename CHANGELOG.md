@@ -22,53 +22,14 @@ to do. Sections: **Added**, **Changed**, **Fixed**, **Breaking**, **Upgrading**.
 
 ## Unreleased
 
-## v0.8.0 — 2026-10-17
-
 ### Added
 
-- Provisional multi-member workspaces support deterministic offline preparation
-  and inventory loading with `schemaVersion: 2`. Multi-member eval, workspace push and Lift
-  remain unavailable.
-- `kmx suite policy FILE [--administrative-policy FILE]` resolves portable
-  deny-write and v2 network policies offline; administrative policy can only
-  add restrictions. Orka members can declare `policy: policy.json` for
-  packaging and unevaluated publication. No policy is installed or enforced;
-  eval, evaluated publication, Lift and AgentKit export refuse declared policies.
-- `kmx eval export --member ID --out FILE` exports completed exact-suite/member
-  evidence without model, cluster or registry calls.
-  `kmx eval verify --suite LAYOUT --evidence FILE --expect FILE` checks it offline
-  against independently reviewed expectations. Unsigned consistency is not
-  evaluator authentication, execution attestation or a replacement for private
-  push/Lift evidence.
-- Release Lift records suite/consumed-evidence identity, evaluation environment,
-  promotion gate and attempt time on newly created Orka/kagent primary objects.
-  Exact reuse and verified skips remain no-write; existing objects are not
-  backfilled and records grant no replay authority.
 - A copy-paste AKS Free-tier walkthrough now follows the supported lifecycle:
   author and prove a native Orka workspace locally before creating billable
   Azure resources, configure owner-held Provider credentials, publish an exact
   ACR digest, review source-evidence promotion, Lift once, inspect, and teardown.
   It validates conservative model/endpoint/name inputs before setup and records
   the local state that teardown intentionally leaves behind. [AKS demo](docs/aks-demo.md).
-- `kmx status --to NAME [--workspace DIR] [-o table|json]` inventories deployed
-  Orka/kagent Agents, provenance and placement readiness using bounded GETs only.
-  Missing, unknown and foreign provenance remain distinct. No Secrets, private
-  history, evaluation or repair; Ready means placement, not an evaluated answer.
-- Single-member `schemaVersion: 3` packages explicit runtime/build profiles
-  under one suite digest.
-  `push --runtime-profile ID [--platform OS/ARCH] --unevaluated` selects an offline
-  view while transferring every profile; `suite build` resolves exact profile
-  tuples. Profiled execution, proof creation/export, evaluated publication, Lift
-  and AgentKit production remain
-  unavailable. [Offline runtime profiles](docs/suite-workspace.md#explicit-runtime-profiles-offline-only).
-
-### Changed
-
-- AgentSuite now comes from `github.com/agent-primitives/suite v0.4.0`.
-- AgentSessions now uses `github.com/agent-primitives/sessions v0.2.0`.
-  Development-runtime/profile and proof identity pins are unchanged; this does
-  not upgrade operator daemons or qualify new lifecycle, approval or tool-executor
-  capabilities.
 
 ### Fixed
 
@@ -97,6 +58,54 @@ to do. Sections: **Added**, **Changed**, **Fixed**, **Breaking**, **Upgrading**.
 - Remaining runtime/setup/list/show messages no longer generate the removed
   `create --live` command. They point to guided quickstart or offline
   Create-Prove-Lift, as appropriate.
+- Orka workspace eval and composed Lift distinguish unsuccessful Task execution
+  from assertion failures and report executed, planned, passed and unexecuted
+  runs after an abort. Root eval adds `-o text|json` (default text; JSON is
+  Orka-only); Lift JSON adds run-local execution counts without changing existing
+  fields. Abort, verified cleanup, passing-evidence and publication rules are
+  unchanged; fully executed threshold misses retain normal run-pass summaries.
+
+## v0.8.0 — 2026-10-17
+
+### Added
+
+- Provisional multi-member workspaces support deterministic offline preparation
+  and inventory loading with `schemaVersion: 2`. Multi-member eval, workspace push and Lift
+  remain unavailable.
+- `kmx suite policy FILE [--administrative-policy FILE]` resolves portable
+  deny-write and v2 network policies offline; administrative policy can only
+  add restrictions. Orka members can declare `policy: policy.json` for
+  packaging and unevaluated publication. No policy is installed or enforced;
+  eval, evaluated publication, Lift and AgentKit export refuse declared policies.
+- `kmx eval export --member ID --out FILE` exports completed exact-suite/member
+  evidence without model, cluster or registry calls.
+  `kmx eval verify --suite LAYOUT --evidence FILE --expect FILE` checks it offline
+  against independently reviewed expectations. Unsigned consistency is not
+  evaluator authentication, execution attestation or a replacement for private
+  push/Lift evidence.
+- Release Lift records suite/consumed-evidence identity, evaluation environment,
+  promotion gate and attempt time on newly created Orka/kagent primary objects.
+  Exact reuse and verified skips remain no-write; existing objects are not
+  backfilled and records grant no replay authority.
+- `kmx status --to NAME [--workspace DIR] [-o table|json]` inventories deployed
+  Orka/kagent Agents, provenance and placement readiness using bounded GETs only.
+  Missing, unknown and foreign provenance remain distinct. No Secrets, private
+  history, evaluation or repair; Ready means placement, not an evaluated answer.
+- Single-member `schemaVersion: 3` packages explicit runtime/build profiles
+  under one suite digest.
+  `push --runtime-profile ID [--platform OS/ARCH] --unevaluated` selects an offline
+  view while transferring every profile; `suite build` resolves exact profile
+  tuples. Profiled execution, proof creation/export, evaluated publication, Lift
+  and AgentKit production remain
+  unavailable. [Offline runtime profiles](docs/suite-workspace.md#explicit-runtime-profiles-offline-only).
+
+### Changed
+
+- AgentSuite now comes from `github.com/agent-primitives/suite v0.4.0`.
+- AgentSessions now uses `github.com/agent-primitives/sessions v0.2.0`.
+  Development-runtime/profile and proof identity pins are unchanged; this does
+  not upgrade operator daemons or qualify new lifecycle, approval or tool-executor
+  capabilities.
 
 ### Breaking
 
