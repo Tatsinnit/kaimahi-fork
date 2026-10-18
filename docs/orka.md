@@ -118,12 +118,16 @@ sends a separate fresh answer Task. Console Ready is placement only. Independent
 live Orka Agents can use `run --agent` and chat; suite-owned Agents refuse legacy
 invocation. `task result` reads existing Task phase/answer without resending.
 
+### Runtime and result access
+
 Result reads require a separately provisioned namespaced Task-get account.
 KMX installation/local setup provisions `orka-result-reader`; upstream-installed
 runtime owners must arrange it separately. Tokens carry the account's effective
 authority and discarding one is not revocation. Results use a context-pinned
 loopback forward/connection and stop on connection loss, not resubmit. Ready
-or admission alone does not prove model execution or result-read access.
+or admission alone does not prove model execution or result-read access. Normal
+successful commands print only a short pointer to this boundary; authorization
+and transport failures remain explicit errors.
 
 ## The whole journey, from nothing
 
