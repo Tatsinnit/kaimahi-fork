@@ -180,7 +180,7 @@ func (a *App) openOrkaResultSession(ctx context.Context, opt CreateOptions) (*or
 	if request.Status.Expiration.Before(deadline.Add(30 * time.Second)) {
 		return nil, fmt.Errorf("granted token lifetime does not cover the total execution deadline plus 30 seconds; refusing execution")
 	}
-	a.notef("Result access uses the selected ServiceAccount; authority details: docs/orka.md#runtime-and-result-access")
+	a.notef("Result access uses ServiceAccount %q; authority details: docs/orka.md#runtime-and-result-access", opt.ResultServiceAccount)
 	// Token coverage above uses the original execution cap, not an injected
 	// forward deadline. Bound this phase only once all session preflight passed.
 	forwardParent, stop := a.waitContext(ctx, "orka-result-forward", 0)

@@ -193,7 +193,7 @@ func TestOrkaResultSessionEstablishesAndReusesOneConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer session.close()
-	if notice := diagnostics.String(); notice != "Result access uses the selected ServiceAccount; authority details: docs/orka.md#runtime-and-result-access\n" {
+	if notice := diagnostics.String(); notice != "Result access uses ServiceAccount \"reader\"; authority details: docs/orka.md#runtime-and-result-access\n" {
 		t.Fatalf("result authority notice is not concise and actionable: %q", notice)
 	}
 	select {
