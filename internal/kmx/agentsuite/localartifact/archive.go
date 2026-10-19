@@ -93,6 +93,7 @@ func archiveFiles(ctx context.Context, raw []byte) (map[string][]byte, error) {
 	reader := tar.NewReader(stream)
 	files := map[string][]byte{}
 	types := map[string]byte{}
+	rootSeen := false
 	for entries := 0; ; entries++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -115,8 +116,18 @@ func archiveFiles(ctx context.Context, raw []byte) (map[string][]byte, error) {
 			return nil, ErrArtifactLimit
 		}
 		name, err := archivePath(header)
+		if err != nil || len(header.PAXRecords) != 0 {
+			return nil, ErrArtifact
+		}
+		if name == "" {
+			if rootSeen || header.Typeflag != tar.TypeDir || header.Size != 0 {
+				return nil, ErrArtifact
+			}
+			rootSeen = true
+			continue
+		}
 		_, duplicate := types[name]
-		if err != nil || len(header.PAXRecords) != 0 || duplicate || archivePathConflict(name, header.Typeflag == tar.TypeDir, types) {
+		if duplicate || archivePathConflict(name, header.Typeflag == tar.TypeDir, types) {
 			return nil, ErrArtifact
 		}
 		types[name] = header.Typeflag
@@ -148,10 +159,14 @@ func archiveFiles(ctx context.Context, raw []byte) (map[string][]byte, error) {
 }
 
 func archivePath(header *tar.Header) (string, error) {
-	name := header.Name
+	name := strings.TrimPrefix(header.Name, "./")
 	if header.Typeflag == tar.TypeDir {
+		if name == "" && header.Name == "./" {
+			return "", nil
+		}
+		original := name
 		name = strings.TrimSuffix(name, "/")
-		if header.Name != name+"/" {
+		if original != name+"/" {
 			return "", ErrArtifact
 		}
 	}

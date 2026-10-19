@@ -230,6 +230,8 @@ func TestLoadArchiveRefusesUnsafeBoundariesAndPreservesCancellation(t *testing.T
 	}{
 		{"traversal", []archiveRecord{regular("../index.json", "{}")}},
 		{"duplicate", []archiveRecord{regular("index.json", "{}"), regular("index.json", "{}")}},
+		{"dot-prefix traversal", []archiveRecord{regular("./../index.json", "{}")}},
+		{"dot-prefix duplicate", []archiveRecord{regular("index.json", "{}"), regular("./index.json", "{}")}},
 		{"symlink", []archiveRecord{{header: tar.Header{Name: "index.json", Typeflag: tar.TypeSymlink, Linkname: "other"}}}},
 		{"fifo", []archiveRecord{{header: tar.Header{Name: "index.json", Typeflag: tar.TypeFifo}}}},
 		{"file parent before child", []archiveRecord{regular("blobs", "x"), regular("blobs/sha256/value", "x")}},
@@ -292,6 +294,30 @@ func TestLoadArchiveRefusesUnsafeBoundariesAndPreservesCancellation(t *testing.T
 		if _, err := suiteview.LoadArchive(t.Context(), bytes.NewReader(raw), int64(len(raw)), suiteview.Selection{MemberID: "writer"}); refusalCode(t, err) != tc.want {
 			t.Fatalf("oversized metadata accepted: %v", err)
 		}
+	}
+}
+
+func TestLoadArchiveAcceptsSingleDotPrefix(t *testing.T) {
+	layout := filepath.Join(t.TempDir(), "layout")
+	pushed := pushFixture(t, "minimal", layout, "minimal:v1")
+	records := []archiveRecord{
+		{header: tar.Header{Name: "./", Mode: 0o755, Typeflag: tar.TypeDir}},
+		{header: tar.Header{Name: "./blobs/", Mode: 0o755, Typeflag: tar.TypeDir}},
+		{header: tar.Header{Name: "./blobs/sha256/", Mode: 0o755, Typeflag: tar.TypeDir}},
+	}
+	for _, record := range layoutRecords(t, layout) {
+		record.header.Name = "./" + record.header.Name
+		records = append(records, record)
+	}
+	selection := suiteview.Selection{ManifestDigest: pushed.Descriptor.Digest.String(), MemberID: "writer"}
+	want, err := suiteview.LoadLayout(t.Context(), layout, selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := makeArchive(t, records)
+	got, err := suiteview.LoadArchive(t.Context(), bytes.NewReader(raw), int64(len(raw)), selection)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatal("single-dot-prefixed archive changed recipe", err, got)
 	}
 }
 
