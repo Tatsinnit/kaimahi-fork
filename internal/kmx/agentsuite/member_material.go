@@ -96,10 +96,11 @@ func ProjectMember(ctx context.Context, files map[string][]byte, artifactDigest,
 
 func cloneDescriptor(value agentsuite.Descriptor) agentsuite.Descriptor {
 	if value.Annotations != nil {
-		value.Annotations = make(map[string]string, len(value.Annotations))
+		annotations := make(map[string]string, len(value.Annotations))
 		for key, item := range value.Annotations {
-			value.Annotations[key] = item
+			annotations[key] = item
 		}
+		value.Annotations = annotations
 	}
 	return value
 }
