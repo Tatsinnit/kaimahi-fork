@@ -112,12 +112,50 @@ or aliasing mutable selected bytes. There is no profiled inventory API.
 `suite build DIRECTORY --runtime-profile ID [--platform OS/ARCH]` resolves an
 exact composition/build profile offline, but the existing AgentKit producer
 **refuses every profiled plan** before exporting or invoking Docker. There is no
-producer fallback, Sessions image-build adapter or suite/image association here.
+producer fallback or Sessions image-build adapter.
 Profiled execution, evaluated push, private receipt creation/export, native public
 evidence export and Lift all refuse, including profiles declaring `runtime.id=orka`.
 Only explicit unevaluated publication is available. Independent `eval verify`
 can check externally produced portable evidence against separately reviewed
 expectations; it grants no private push/Lift authority.
+
+### Detached Sessions declarations (internal, offline only)
+
+Internal `workspace.NewSessionsAssociation` and `CheckSessionsAssociation` create
+and check canonical detached `SessionsAssociationV1` JSON against the frozen
+selected graph. They do not write files, alter S, discover records from caches,
+read source or contact a registry. There is no CLI association flag or consumer.
+
+The closed record requires `version: 1`, `kind: "kmx.sessions-association"`,
+`suiteDigest`, `memberID`, `runtimeProfile: {id, digest}`,
+`compositionDigest`, `buildProfileDigest`, `platform: {os, architecture, variant}`
+(including empty `variant`), `harnessImage`, `executionKind: "harnesswire-chat-v1"`,
+`configDigest` and `imageVerification: "declared-unverified"`. Inputs are at most
+16 KiB and must exactly match independently derived canonical bytes; missing,
+null, unknown, duplicate or mismatched fields refuse without echoing payloads.
+
+Only a selected declaration with `runtime.id=agentsessions`, no member policy and
+no build-profile `execution` contract is eligible. This selects a declaration
+family, not a supported runtime. The image reference must echo the selected
+build profile's exact digest-pinned harness reference; mirrored repositories,
+tags and profile/build-profile harness digest mismatches refuse. Config uses
+the existing framed hash of the exact JSON `system_prompt` bytes. Mutable
+selected-view fields cannot change the frozen selection or its config.
+
+**The image digest and platform are declared, not verified.** No image bytes are
+read; runtime/harness/renderer versions and configuration ABI are not qualified.
+Successful declaration checks grant no execution, evidence, evaluated-publication
+or Lift authority. Profiled execution and Apply remain refused.
+
+Suite instructions are **non-confidential and must never contain secrets**.
+Authorized Sessions Replay readers, journal-at-rest readers and route-config
+readers may see injected instructions; credentials must stay host-side.
+Source and packaged-native preflight reuse the existing credential-shape checker.
+A match in valid UTF-8 instructions adds a fixed, redacted `Warning:` line before
+the existing hard refusal in the returned error diagnostic; it is not an
+admission mode or a separate warnings result. No matched bytes are printed.
+Other credential and invalid-Unicode refusals stay in place. Clean lint does
+not establish that instructions are secret-free.
 
 ### Offline private receipt consistency
 
@@ -144,8 +182,7 @@ The receipt-only projection preserves the profiled marker/graph, never fills or
 changes observed receipt runtime/host facts, and cannot enter execution or export.
 Public implementation digests are **not qualified** by this consistency check.
 Synthetic tests demonstrate only lookup/binding consistency, not two-runtime
-execution. Real profiled execution/evidence integration and image association
-remain unavailable.
+execution. Real profiled execution/evidence integration remains unavailable.
 
 ## Provisional multi-member source (offline only)
 
@@ -383,8 +420,9 @@ KMX state directory when `KMX_HOME` is unset). Immutable `intent.json`, per-crea
 `1.json`/`2.json`, and a final checkpoint up to `3.json` retain acknowledged
 identities, outcomes and readiness, including partial/failed attempts. File modes
 are 0600 under 0700 directories. Ordinary observation-only attempts retain four
-slots. New complete Orka pair creates additionally reserve `4.json` for explicit
-record-bound ownership and acknowledged shared completion (below). Storage remains
+slots. New complete Orka pair creates additionally reserve `4.json` as a
+record-bound ownership candidate and a final `committed.json` acknowledgment
+marker (below). Storage remains
 bounded to 256 attempts and 64 MiB, with no automatic pruning. These intent/outcome
 observations never grant skip, evaluation or replay authority; older observations
 are never converted into the new explicit ownership proof.
@@ -427,8 +465,21 @@ acknowledged outcomes: no specs, receipt bodies, prompts, answers, Secret values
 or binding bytes. A CAS reservation spans both native objects. After acknowledged
 creation, private `4.json` binds the exact pair to the ConfigMap UID **and the
 acknowledged completed shared payload**. It is published only after the shared
-completion response succeeds. A lost final response or failed private checkpoint
-therefore cannot authorize the next attempt, even if the API committed its write.
+completion response succeeds, but visibility alone is not commitment: publication
+can still fail after its hard link. The writer installs `committed.json` as a
+final exclusive hard link only after publication checks and fallible output cleanup
+succeed. Readers require both files with exactly matching bytes, plus all existing
+record/target/object/dependency checks. A lost shared response or failed private
+checkpoint therefore cannot authorize the next attempt, even if the shared API
+committed its write or `4.json` is visible.
+
+The final marker link is the local eligibility commit point. Capacity exclusion
+remains held through it. No post-link sync, cancellation or handle-cleanup failure
+retroactively labels a committed acknowledgment unknown. The final directory entry
+is not promised crash-durable: losing it after a crash conservatively blocks further
+updates. A copied complete backup must preserve both files' exact bytes, not their
+hard-link identity. These are unsigned private records, not tamper authentication;
+never create a marker by hand or prune a candidate to bypass a failed checkpoint.
 JSON results identify this object separately as `releaseRecord` with name, UID
 when acknowledged, and `pending`, `ready` or `unknown` state.
 
@@ -439,6 +490,10 @@ annotations, a copied ConfigMap or old observation files alone cannot replace it
 Agents lifted by **v0.8.1 or earlier cannot be updated yet**. Reused or otherwise
 unenrolled placements also lack update-capable proof. Explicitly recreate the
 owned pair with this version when ready; no enrollment/backfill is performed.
+Unmarked proofs from unreleased #573 builds also refuse, including previously
+successful test baselines: their visible `4.json` cannot distinguish successful
+publication from a failed post-link checkpoint. No migration or marker repair is
+performed; explicit owned-pair recreation is required.
 
 A pre-send refusal does not mint a partial revision or change object markers.
 After a reservation but before any object send, the active writer can restore only

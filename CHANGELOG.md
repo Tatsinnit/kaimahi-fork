@@ -34,7 +34,27 @@ to do. Sections: **Added**, **Changed**, **Fixed**, **Breaking**, **Upgrading**.
   runtime/build/tool/policy/evaluation plan. KMX native loaders call the public
   projection on their frozen snapshots before applying separate runtime-private
   checks.
+- Internal offline detached Sessions association records bind exact selected suite,
+  profile, build-profile, platform and chat config declarations without changing
+  suite bytes. Image references are explicitly `declared-unverified`; no image
+  verification, runtime qualification, executable plan, CLI consumer or Apply
+  support is enabled.
+
+### Fixed
+
+- A private Orka ownership checkpoint could leave visible `4.json` after a
+  post-link persistence failure, incorrectly authorizing a later update. Fresh
+  create and internal update now require a final `committed.json` marker after
+  publication checks and output cleanup succeed. Lost shared-write responses
+  still block; there is no retry, backfill or automatic cleanup.
+
 ### Changed
+
+- Credential-shaped suite instructions now add a fixed redacted warning before
+  the existing source/package hard refusal. Instructions are non-confidential
+  and must never contain secrets; clean lint is not a secret-free guarantee.
+  Package diagnostics expose this fixed warning instead of only a generic
+  verification failure. Other credential and invalid-Unicode refusals remain.
 
 - Complete fresh Orka Lift creates now retain a namespace-local shared release
   record and explicit private ownership proof for the forthcoming updater
@@ -47,6 +67,11 @@ to do. Sections: **Added**, **Changed**, **Fixed**, **Breaking**, **Upgrading**.
 
 ### Breaking
 
+- All unmarked private ownership proofs are refused, including successful test
+  baselines from unreleased #573 builds. A visible `4.json` alone is not a
+  completed acknowledgment. Recreate an owned pair explicitly when ready; no
+  migration, enrollment, backfill or deletion is performed automatically. #573
+  has not been released; this affects only those unreleased test baselines.
 - Fresh Orka pair Lift now requires namespace-local ConfigMap create plus
   named-record get/patch access and available private retention capacity. Missing
   access/storage and stale records fail closed. Shared history rolls only old
