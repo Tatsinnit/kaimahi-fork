@@ -96,6 +96,35 @@ func TestReadArtifactDuplicateRootMustBeIdentityEquivalent(t *testing.T) {
 	}
 }
 
+func TestReadArtifactPreservesUnsupportedPlatformFieldsForValidation(t *testing.T) {
+	layout := filepath.Join(t.TempDir(), "layout")
+	if _, err := Push(t.Context(), filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), layout, "suite:v1"); err != nil {
+		t.Fatal(err)
+	}
+	indexPath := filepath.Join(layout, "index.json")
+	raw, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var index map[string]any
+	if err := json.Unmarshal(raw, &index); err != nil {
+		t.Fatal(err)
+	}
+	index["manifests"].([]any)[0].(map[string]any)["platform"] = map[string]any{
+		"os": "linux", "architecture": "amd64", "os.version": "canary", "os.features": []any{"canary"},
+	}
+	raw, err = json.Marshal(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(indexPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadArtifactLayoutSelection(t.Context(), layout, ""); !errors.Is(err, ErrArtifact) {
+		t.Fatalf("unsupported platform fields were normalized away: %v", err)
+	}
+}
+
 func TestReadArtifactRefusesLayoutFIFOWithoutBlocking(t *testing.T) {
 	if layout := os.Getenv("KMX_TEST_ARTIFACT_FIFO_LAYOUT"); layout != "" {
 		if _, err := ReadArtifactLayoutSelection(t.Context(), layout, ""); !errors.Is(err, ErrArtifact) {

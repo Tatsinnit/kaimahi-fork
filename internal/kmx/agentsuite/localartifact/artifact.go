@@ -1,4 +1,4 @@
-package materialio
+package localartifact
 
 import (
 	"archive/tar"
@@ -159,13 +159,13 @@ func Read(ctx context.Context, source Fetcher, root ocispec.Descriptor, expected
 	if err != nil {
 		return nil, err
 	}
-	if err := validateSelectedGraph(ctx, root, manifest.ArtifactType, manifestBytes, config, configBytes, layer, layerBytes); err != nil {
+	if err := validateSelectedGraph(ctx, root, manifestBytes, config, configBytes, layer, layerBytes); err != nil {
 		return nil, err
 	}
 	return &Artifact{descriptor: cloneOCIDescriptor(root), files: files}, ctx.Err()
 }
 
-func validateSelectedGraph(ctx context.Context, root ocispec.Descriptor, artifactType string, manifestBytes []byte, config ocispec.Descriptor, configBytes []byte, layer ocispec.Descriptor, layerBytes []byte) (err error) {
+func validateSelectedGraph(ctx context.Context, root ocispec.Descriptor, manifestBytes []byte, config ocispec.Descriptor, configBytes []byte, layer ocispec.Descriptor, layerBytes []byte) (err error) {
 	stage, err := os.MkdirTemp("", "kmx-artifact-*")
 	if err != nil {
 		return err
@@ -190,8 +190,6 @@ func validateSelectedGraph(ctx context.Context, root ocispec.Descriptor, artifac
 		return err
 	}
 	selected := cloneOCIDescriptor(root)
-	selected.ArtifactType = artifactType
-	selected.Data, selected.URLs, selected.Platform = nil, nil, nil
 	index := ocispec.Index{Manifests: []ocispec.Descriptor{selected}}
 	index.SchemaVersion = 2
 	index.MediaType = ocispec.MediaTypeImageIndex

@@ -5,12 +5,13 @@
 KMX currently has three distinct public surfaces:
 
 1. The working `kmx` CLI.
-2. The concrete read-only Go loader in `pkg/suitematerial`.
+2. The concrete read-only Go loader in `pkg/suiteview`.
 3. The experimental lifecycle contracts in `pkg/kmx`.
 
-The CLI is the usable end-to-end product interface today. `pkg/suitematerial`
-implements one narrow local-artifact read path and is reused by KMX's native
-loader. `pkg/kmx` defines the intended application boundary, but it does not yet
+The CLI is the usable end-to-end product interface today. `pkg/suiteview`
+implements one narrow local-artifact read path; KMX's native loaders call its
+public projection on already frozen snapshots. `pkg/kmx` defines the intended
+application boundary, but it does not yet
 provide exported concrete implementations or constructors and is not wired to
 the CLI.
 
@@ -49,7 +50,7 @@ Another product / CLI / UI / controller / API
 ```
 
 This diagram describes the `pkg/kmx` orchestration contracts. The separate
-`pkg/suitematerial` package is a concrete read-only input adapter, not a fourth
+`pkg/suiteview` package is a concrete read-only input adapter, not a fourth
 northbound lifecycle interface. The SPI row remains
 internal so a consumer cannot select concrete adapters directly or couple itself
 to Kubernetes, a cloud, a registry transport, or one runtime.
@@ -60,18 +61,18 @@ live under `internal/kmx/agentsuite` and `internal/kmx/lifecycle`. Application
 orchestration, durable stores, production adapters, and CLI wiring are not yet
 implemented end to end.
 
-## Read one member's execution material
+## View one member's portable recipe
 
-`pkg/suitematerial` verifies one local packaged AgentSuite artifact and projects
+`pkg/suiteview` verifies one local packaged AgentSuite artifact and projects
 one explicit member without authoring, execution or deployment behavior:
 
 ```text
-github.com/kaimahi-agents/kaimahi/pkg/suitematerial
+github.com/kaimahi-agents/kaimahi/pkg/suiteview
 ```
 
 ```go
-material, err := suitematerial.LoadLayout(ctx, layout, suitematerial.Selection{
-    ArtifactDigest: "sha256:<exact-manifest>", // optional only for one root
+recipe, err := suiteview.LoadLayout(ctx, layout, suiteview.Selection{
+    ManifestDigest: "sha256:<exact-manifest>", // optional only for one root
     MemberID:       "writer",
 })
 ```
@@ -86,12 +87,18 @@ selection for a bounded uncompressed OCI image-layout tar. It freezes at most
 - copied instruction bytes and their descriptor;
 - the complete `agentsuite.ModelRequirement`, including capability-based forms.
 
-The member ID is always required. An artifact digest may be omitted only when
-the OCI index contains one unambiguous root; multiple roots require an exact
-canonical SHA-256 digest. Returned bytes, descriptor annotations, capability
-values and secret-reference names are caller-owned copies.
+`ProjectMember` is the lower-level projection KMX itself uses after it has
+already verified and frozen an artifact snapshot. It rechecks the selected
+member and instruction descriptors, but leaves `Artifact` empty because it does
+not validate or bind an enclosing OCI graph. Ordinary external callers should
+use `LoadLayout` or `LoadArchive`.
 
-Failures are `*suitematerial.Refusal` values with stable, payload-free codes.
+The member ID is always required. A manifest digest may be omitted only when
+the OCI index contains one unambiguous root; multiple roots require an exact
+canonical SHA-256 digest. Returned bytes, member and instruction descriptor
+annotations, capability values and secret-reference names are caller-owned copies.
+
+Failures are `*suiteview.Refusal` values with stable, payload-free codes.
 Cancellation and deadline identity remain available through `errors.Is`.
 Filesystem/parser details, authored values and paths are not included in the
 public error. Consumer resource ceilings, including the 64 MiB outer archive,
@@ -101,8 +108,9 @@ never reads KMX configuration or registry credentials,
 contacts a runtime/model/cluster, verifies evaluation evidence, publishes, or
 Lifts. Temporary private validation storage may be used and removed before
 return; caller input is never mutated. Evidence remains owned by
-`agentsuite.VerifyEvaluation`. The returned Go values are in-process material,
-not a serialized persistence or receipt format. Callers must not mutate a layout
+`agentsuite.VerifyEvaluation`. `MemberRecipe` is the portable behavioral core
+shown above, not a complete runtime/build/tool/policy/evaluation recipe and not a
+serialized persistence or receipt format. Callers must not mutate a layout
 concurrently with `LoadLayout`.
 
 ## Alpha lifecycle interfaces

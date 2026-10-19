@@ -1,6 +1,6 @@
 //go:build unix
 
-package materialio
+package localartifact
 
 import "syscall"
 

@@ -29,7 +29,7 @@ class KagentClassificationTests(unittest.TestCase):
             "internal/kmx/guard/guard.go", "internal/kmx/run/run.go",
             "internal/kmx/config/config.go", "internal/kmx/secretshapes/shapes.json",
             "internal/kmx/toolchain/tools.go", "internal/kmx/agentsuite/workspace/load.go",
-            "pkg/suitematerial/material.go", "cmd/kmx/main.go", "go.mod", "go.sum", "embed.go",
+            "pkg/suiteview/recipe.go", "cmd/kmx/main.go", "go.mod", "go.sum", "embed.go",
             "internal/kmx/app/testdata/model.json", "scripts/ci/kagent-lift.sh",
             "scripts/ci/kagent-lift-fixture.py", "scripts/test_kagent_lift_fixture.py",
             "scripts/check-legacy-runtime.py", "scripts/legacy-runtime-allowlist.json",

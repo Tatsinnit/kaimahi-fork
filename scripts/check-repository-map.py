@@ -996,7 +996,7 @@ SELFTEST_FILES = {
     "internal/kmx/app/lift.go": "package app\n",
     "pkg/kmx/doc.go": "package kmx\n",
     "pkg/kmx/doc_test.go": "package kmx\n",
-    "pkg/suitematerial/material.go": "package suitematerial\n",
+    "pkg/suiteview/recipe.go": "package suiteview\n",
     "k8s/embedded.yaml": "kind: ConfigMap\n",
     "k8s/assets/config.yaml": "kind: ConfigMap\n",
     "k8s/checkout.yaml": "kind: ConfigMap\n",
@@ -1047,7 +1047,7 @@ There is no `require`, and no `plane/...` import anywhere in root `cmd/` or `int
 | Public package | Non-test files | Status | Responsibility |
 |---|---:|---|---|
 | `pkg/kmx` | 1 | Alpha | Contracts |
-| `pkg/suitematerial` | 1 | Concrete | Read-only material |
+| `pkg/suiteview` | 1 | Concrete | Read-only member recipes |
 
 ## `k8s/` — installed and checkout artifacts
 Two of `k8s/`'s 6 files are embedded; four are not embedded.
@@ -1103,7 +1103,7 @@ MAP_EDITS = [
      "miscounts its open questions"),
     ("| `kmx/app` | 1 |", "| `kmx/app` | 2 |",
      "gets a package's source-file count wrong"),
-    ("| `pkg/suitematerial` | 1 |", "| `pkg/suitematerial` | 2 |",
+    ("| `pkg/suiteview` | 1 |", "| `pkg/suiteview` | 2 |",
      "gets a public package's source-file count wrong"),
     ("| `.` | 2 |", "| `.` | 3 |",
      "gets the portable package's direct non-test file count wrong"),
@@ -1322,20 +1322,20 @@ def selftest_fixture(tree: Tree) -> int:
         "| Public package | Non-test files | Status | Responsibility |\n"
         "|---|---:|---|---|\n"
         "| `pkg/kmx` | 1 | Alpha | Contracts |\n"
-        "| `pkg/suitematerial` | 1 | Concrete | Read-only material |\n"
+        "| `pkg/suiteview` | 1 | Concrete | Read-only member recipes |\n"
     )
-    public_files = ["pkg/kmx/doc.go", "pkg/kmx/doc_test.go", "pkg/suitematerial/material.go"]
+    public_files = ["pkg/kmx/doc.go", "pkg/kmx/doc_test.go", "pkg/suiteview/recipe.go"]
     for text, extra, expected, label in [
         (public_map, [], "", "public package inventory passes and excludes Go tests"),
         (public_map.replace("| `pkg/kmx` | 1 |", "| `pkg/kmx` | 2 |"), [],
          "non-test files", "public package count drift is refused"),
         (public_map, ["pkg/newpackage/file.go"], "directory coverage",
          "unclassified public package is refused"),
-        (public_map.replace("| `pkg/suitematerial` | 1 | Concrete | Read-only material |\n", ""), [],
+        (public_map.replace("| `pkg/suiteview` | 1 | Concrete | Read-only member recipes |\n", ""), [],
          "directory coverage", "omitted public package is refused"),
-        (public_map.replace("pkg/suitematerial", "pkg/missing"), [], "directory",
+        (public_map.replace("pkg/suiteview", "pkg/missing"), [], "directory",
          "equal-count wrong public package is refused"),
-        (public_map, ["pkg/suitematerial/more_test.go"], "",
+        (public_map, ["pkg/suiteview/more_test.go"], "",
          "additional public Go tests do not change non-test counts"),
     ]:
         variant = Tree(tree.root, files=public_files + extra)

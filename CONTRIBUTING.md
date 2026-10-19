@@ -160,7 +160,7 @@ and in the nightly hygiene job. Its inexpensive runner/routing tests and other
 hygiene checks run regardless of that mutation gate.
 
 One Go module contains the root CLI (`cmd/kmx`, `internal/kmx`), concrete
-read-only suite material loader (`pkg/suitematerial`) and alpha application
+read-only suite member recipe view (`pkg/suiteview`) and alpha application
 interfaces (`pkg/kmx`). Portable AgentSuite validation is a separate dependency:
 `agentsuite "github.com/agent-primitives/suite"`, pinned to the published minor release
 `v0.4.0` in `go.mod` with verified module sums.

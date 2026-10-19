@@ -1,5 +1,5 @@
 //go:build !unix && !windows
 
-package materialio
+package localartifact
 
 const readFlags = 0

@@ -1,4 +1,4 @@
-package materialio
+package localartifact
 
 import (
 	"archive/tar"

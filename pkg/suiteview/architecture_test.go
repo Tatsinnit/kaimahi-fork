@@ -1,4 +1,4 @@
-package suitematerial_test
+package suiteview_test
 
 import (
 	"os/exec"
@@ -29,4 +29,33 @@ func TestPublicPackageKeepsOperationalDependenciesOut(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestWorkspaceUsesPublicProjectionWithoutReverseDependency(t *testing.T) {
+	const module = "github.com/kaimahi-agents/kaimahi/"
+	imports := func(packagePath string) []string {
+		t.Helper()
+		output, err := exec.Command("go", "list", "-f", `{{join .Imports "\n"}}`, packagePath).CombinedOutput()
+		if err != nil {
+			t.Fatal(err, string(output))
+		}
+		return strings.Fields(string(output))
+	}
+	workspace := imports(module + "internal/kmx/agentsuite/workspace")
+	if !contains(workspace, module+"pkg/suiteview") {
+		t.Fatal("native workspace loading does not use the public suiteview projection")
+	}
+	view := imports(module + "pkg/suiteview")
+	if contains(view, module+"internal/kmx/agentsuite") {
+		t.Fatal("public suiteview projection depends on its former internal implementation")
+	}
+}
+
+func contains(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }

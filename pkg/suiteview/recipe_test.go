@@ -1,4 +1,4 @@
-package suitematerial_test
+package suiteview_test
 
 import (
 	"archive/tar"
@@ -18,7 +18,7 @@ import (
 
 	agentsuite "github.com/agent-primitives/suite"
 	suiteoras "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/oras"
-	"github.com/kaimahi-agents/kaimahi/pkg/suitematerial"
+	"github.com/kaimahi-agents/kaimahi/pkg/suiteview"
 	godigest "github.com/opencontainers/go-digest"
 )
 
@@ -35,25 +35,25 @@ func pushFixture(t *testing.T, name, layout, reference string) suiteoras.PushRes
 	return result
 }
 
-func refusalCode(t *testing.T, err error) suitematerial.RefusalCode {
+func refusalCode(t *testing.T, err error) suiteview.RefusalCode {
 	t.Helper()
-	var refusal *suitematerial.Refusal
+	var refusal *suiteview.Refusal
 	if !errors.As(err, &refusal) {
 		t.Fatalf("error is not a typed refusal: %v", err)
 	}
 	return refusal.Code
 }
 
-func TestLoadLayoutAndArchiveReturnOwnedExactMaterial(t *testing.T) {
+func TestLoadLayoutAndArchiveReturnOwnedExactRecipe(t *testing.T) {
 	layout := filepath.Join(t.TempDir(), "layout")
 	pushed := pushFixture(t, "minimal", layout, "minimal:v1")
-	selection := suitematerial.Selection{ArtifactDigest: pushed.Descriptor.Digest.String(), MemberID: "writer"}
-	fromLayout, err := suitematerial.LoadLayout(t.Context(), layout, selection)
+	selection := suiteview.Selection{ManifestDigest: pushed.Descriptor.Digest.String(), MemberID: "writer"}
+	fromLayout, err := suiteview.LoadLayout(t.Context(), layout, selection)
 	if err != nil {
 		t.Fatal(err)
 	}
 	archive := archiveLayout(t, layout)
-	fromArchive, err := suitematerial.LoadArchive(t.Context(), bytes.NewReader(archive), int64(len(archive)), selection)
+	fromArchive, err := suiteview.LoadArchive(t.Context(), bytes.NewReader(archive), int64(len(archive)), selection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,17 +67,62 @@ func TestLoadLayoutAndArchiveReturnOwnedExactMaterial(t *testing.T) {
 		t.Fatal("suite/member identity changed", fromLayout)
 	}
 	if string(fromLayout.Instructions) != "Write clearly.\n" || fromLayout.InstructionsDescriptor.Digest != "sha256:516ff360a8ebb5e36e87f0d401a3cc7436ad2ad1059aae64670aff1078171df8" || fromLayout.Model.Model != "example-model" {
-		t.Fatal("execution material changed", fromLayout)
+		t.Fatal("member recipe changed", fromLayout)
 	}
-	implicit, err := suitematerial.LoadLayout(t.Context(), layout, suitematerial.Selection{MemberID: "writer"})
+	implicit, err := suiteview.LoadLayout(t.Context(), layout, suiteview.Selection{MemberID: "writer"})
 	if err != nil || !reflect.DeepEqual(implicit, fromLayout) {
 		t.Fatal("single root was not selected deterministically", err)
 	}
 	fromLayout.Instructions[0] = 'X'
 	fromLayout.Model.SecretRefs = append(fromLayout.Model.SecretRefs, "changed")
-	fresh, err := suitematerial.LoadLayout(t.Context(), layout, selection)
+	fresh, err := suiteview.LoadLayout(t.Context(), layout, selection)
 	if err != nil || string(fresh.Instructions) != "Write clearly.\n" || len(fresh.Model.SecretRefs) != 0 {
-		t.Fatal("caller changed retained material", err)
+		t.Fatal("caller changed retained recipe", err)
+	}
+}
+
+func TestProjectMemberReturnsOwnedExactRecipe(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "source")
+	copyTree(t, fixture("minimal"), source)
+	annotateDescriptors(t, source)
+	files := readFiles(t, source)
+	rootBytes := files["agentsuite.json"]
+	graphDigest, err := agentsuite.Digest(rootBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipe, err := suiteview.ProjectMember(t.Context(), files, "writer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recipe.Artifact != (suiteview.ArtifactIdentity{}) || recipe.Suite.Name != "minimal" || recipe.Suite.GraphDigest != graphDigest || recipe.Member.ID != "writer" || string(recipe.Instructions) != "Write clearly.\n" || recipe.Model.Model != "example-model" {
+		t.Fatal("projected recipe changed identity or behavior", recipe)
+	}
+	if recipe.Member.Descriptor.Annotations["member-note"] != "retained" || recipe.InstructionsDescriptor.Annotations["instruction-note"] != "retained" {
+		t.Fatal("projected recipe dropped descriptor annotations", recipe)
+	}
+	recipe.Instructions[0] = 'X'
+	recipe.Member.Descriptor.Annotations["member-note"] = "changed"
+	recipe.InstructionsDescriptor.Annotations["instruction-note"] = "changed"
+	fresh, err := suiteview.ProjectMember(t.Context(), files, "writer")
+	if err != nil || string(fresh.Instructions) != "Write clearly.\n" || fresh.Member.Descriptor.Annotations["member-note"] != "retained" || fresh.InstructionsDescriptor.Annotations["instruction-note"] != "retained" {
+		t.Fatal("projected recipe aliases retained input", err, fresh)
+	}
+	if _, err := suiteview.ProjectMember(t.Context(), files, "absent-canary"); refusalCode(t, err) != suiteview.RefusalMemberNotFound || strings.Contains(err.Error(), "canary") {
+		t.Fatalf("unsafe member refusal: %v", err)
+	}
+	files["agents/writer.json"][0] = 'X'
+	if _, err := suiteview.ProjectMember(t.Context(), files, "writer"); refusalCode(t, err) != suiteview.RefusalMember {
+		t.Fatalf("invalid member accepted: %v", err)
+	}
+	files["agentsuite.json"] = make([]byte, (1<<20)+1)
+	if _, err := suiteview.ProjectMember(t.Context(), files, "writer"); refusalCode(t, err) != suiteview.RefusalLimit {
+		t.Fatalf("unbounded projection input accepted: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := suiteview.ProjectMember(ctx, files, "writer"); refusalCode(t, err) != suiteview.RefusalCanceled || !errors.Is(err, context.Canceled) {
+		t.Fatalf("projection cancellation identity lost: %v", err)
 	}
 }
 
@@ -85,30 +130,30 @@ func TestLoadLayoutRequiresUnambiguousRootAndExactMember(t *testing.T) {
 	layout := filepath.Join(t.TempDir(), "layout")
 	minimal := pushFixture(t, "minimal", layout, "minimal:v1")
 	team := pushFixture(t, "coordinator-workers", layout, "team:v1")
-	if _, err := suitematerial.LoadLayout(t.Context(), layout, suitematerial.Selection{MemberID: "writer"}); refusalCode(t, err) != suitematerial.RefusalAmbiguousArtifact {
+	if _, err := suiteview.LoadLayout(t.Context(), layout, suiteview.Selection{MemberID: "writer"}); refusalCode(t, err) != suiteview.RefusalAmbiguousArtifact {
 		t.Fatalf("multiple roots were guessed: %v", err)
 	}
-	writer, err := suitematerial.LoadLayout(t.Context(), layout, suitematerial.Selection{ArtifactDigest: team.Descriptor.Digest.String(), MemberID: "writer"})
+	writer, err := suiteview.LoadLayout(t.Context(), layout, suiteview.Selection{ManifestDigest: team.Descriptor.Digest.String(), MemberID: "writer"})
 	if err != nil || writer.Suite.Name != "coordinator-workers" || writer.Member.ID != "writer" || !strings.Contains(writer.Description, "Writes content") {
 		t.Fatal("non-first member was not selected exactly", err, writer)
 	}
 	archive := archiveLayout(t, layout)
-	if _, err := suitematerial.LoadArchive(t.Context(), bytes.NewReader(archive), int64(len(archive)), suitematerial.Selection{MemberID: "writer"}); refusalCode(t, err) != suitematerial.RefusalAmbiguousArtifact {
+	if _, err := suiteview.LoadArchive(t.Context(), bytes.NewReader(archive), int64(len(archive)), suiteview.Selection{MemberID: "writer"}); refusalCode(t, err) != suiteview.RefusalAmbiguousArtifact {
 		t.Fatalf("archive roots were guessed: %v", err)
 	}
-	archiveWriter, err := suitematerial.LoadArchive(t.Context(), bytes.NewReader(archive), int64(len(archive)), suitematerial.Selection{ArtifactDigest: team.Descriptor.Digest.String(), MemberID: "writer"})
+	archiveWriter, err := suiteview.LoadArchive(t.Context(), bytes.NewReader(archive), int64(len(archive)), suiteview.Selection{ManifestDigest: team.Descriptor.Digest.String(), MemberID: "writer"})
 	if err != nil || !reflect.DeepEqual(archiveWriter, writer) {
 		t.Fatal("archive exact-root selection diverged", err)
 	}
 	missing := "sha256:" + strings.Repeat("a", 64)
-	if _, err := suitematerial.LoadLayout(t.Context(), layout, suitematerial.Selection{ArtifactDigest: missing, MemberID: "writer"}); refusalCode(t, err) != suitematerial.RefusalArtifactNotFound {
+	if _, err := suiteview.LoadLayout(t.Context(), layout, suiteview.Selection{ManifestDigest: missing, MemberID: "writer"}); refusalCode(t, err) != suiteview.RefusalArtifactNotFound {
 		t.Fatalf("missing root refusal changed: %v", err)
 	}
-	if _, err := suitematerial.LoadLayout(t.Context(), layout, suitematerial.Selection{ArtifactDigest: minimal.Descriptor.Digest.String(), MemberID: "absent-canary"}); refusalCode(t, err) != suitematerial.RefusalMemberNotFound || strings.Contains(err.Error(), "canary") {
+	if _, err := suiteview.LoadLayout(t.Context(), layout, suiteview.Selection{ManifestDigest: minimal.Descriptor.Digest.String(), MemberID: "absent-canary"}); refusalCode(t, err) != suiteview.RefusalMemberNotFound || strings.Contains(err.Error(), "canary") {
 		t.Fatalf("unsafe member refusal: %v", err)
 	}
-	for _, selection := range []suitematerial.Selection{{}, {MemberID: "writer", ArtifactDigest: "minimal:v1"}} {
-		if _, err := suitematerial.LoadLayout(t.Context(), layout, selection); refusalCode(t, err) != suitematerial.RefusalSelection {
+	for _, selection := range []suiteview.Selection{{}, {MemberID: "writer", ManifestDigest: "minimal:v1"}} {
+		if _, err := suiteview.LoadLayout(t.Context(), layout, selection); refusalCode(t, err) != suiteview.RefusalSelection {
 			t.Fatalf("invalid selection accepted: %v", err)
 		}
 	}
@@ -131,8 +176,8 @@ func TestLoadPreservesCompleteModelRequirement(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			selection := suitematerial.Selection{ArtifactDigest: pushed.Descriptor.Digest.String(), MemberID: "writer"}
-			got, err := suitematerial.LoadLayout(t.Context(), layout, selection)
+			selection := suiteview.Selection{ManifestDigest: pushed.Descriptor.Digest.String(), MemberID: "writer"}
+			got, err := suiteview.LoadLayout(t.Context(), layout, selection)
 			if err != nil || !reflect.DeepEqual(got.Model, tc.model) {
 				t.Fatal("model requirement was narrowed", err, got.Model)
 			}
@@ -142,11 +187,36 @@ func TestLoadPreservesCompleteModelRequirement(t *testing.T) {
 			if len(got.Model.SecretRefs) != 0 {
 				got.Model.SecretRefs[0] = "changed"
 			}
-			fresh, err := suitematerial.LoadLayout(t.Context(), layout, selection)
+			fresh, err := suiteview.LoadLayout(t.Context(), layout, selection)
 			if err != nil || !reflect.DeepEqual(fresh.Model, tc.model) {
-				t.Fatal("nested model fields alias retained material", err, fresh.Model)
+				t.Fatal("nested model fields alias retained recipe", err, fresh.Model)
 			}
 		})
+	}
+}
+
+func TestLoadPreservesDescriptorAnnotationsWithoutAliasing(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "source")
+	copyTree(t, fixture("minimal"), source)
+	annotateDescriptors(t, source)
+	layout := filepath.Join(t.TempDir(), "layout")
+	pushed, err := suiteoras.Push(t.Context(), source, layout, "annotated:v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := suiteview.Selection{ManifestDigest: pushed.Descriptor.Digest.String(), MemberID: "writer"}
+	recipe, err := suiteview.LoadLayout(t.Context(), layout, selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recipe.Member.Descriptor.Annotations["member-note"] != "retained" || recipe.InstructionsDescriptor.Annotations["instruction-note"] != "retained" {
+		t.Fatal("public recipe dropped descriptor annotations", recipe)
+	}
+	recipe.Member.Descriptor.Annotations["member-note"] = "changed"
+	recipe.InstructionsDescriptor.Annotations["instruction-note"] = "changed"
+	fresh, err := suiteview.LoadLayout(t.Context(), layout, selection)
+	if err != nil || fresh.Member.Descriptor.Annotations["member-note"] != "retained" || fresh.InstructionsDescriptor.Annotations["instruction-note"] != "retained" {
+		t.Fatal("public recipe descriptor annotations alias retained input", err, fresh)
 	}
 }
 
@@ -169,8 +239,8 @@ func TestLoadArchiveRefusesUnsafeBoundariesAndPreservesCancellation(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := makeArchive(t, tc.records)
-			_, err := suitematerial.LoadArchive(t.Context(), bytes.NewReader(raw), int64(len(raw)), suitematerial.Selection{MemberID: "writer"})
-			if refusalCode(t, err) != suitematerial.RefusalArtifact {
+			_, err := suiteview.LoadArchive(t.Context(), bytes.NewReader(raw), int64(len(raw)), suiteview.Selection{MemberID: "writer"})
+			if refusalCode(t, err) != suiteview.RefusalArtifact {
 				t.Fatalf("unsafe archive accepted: %v", err)
 			}
 		})
@@ -185,41 +255,41 @@ func TestLoadArchiveRefusesUnsafeBoundariesAndPreservesCancellation(t *testing.T
 		{"concatenated", append(append([]byte{}, base...), base...)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := suitematerial.LoadArchive(t.Context(), bytes.NewReader(tc.raw), int64(len(tc.raw)), suitematerial.Selection{MemberID: "writer"})
-			if refusalCode(t, err) != suitematerial.RefusalArtifact {
+			_, err := suiteview.LoadArchive(t.Context(), bytes.NewReader(tc.raw), int64(len(tc.raw)), suiteview.Selection{MemberID: "writer"})
+			if refusalCode(t, err) != suiteview.RefusalArtifact {
 				t.Fatalf("malformed archive accepted: %v", err)
 			}
 		})
 	}
 	tooLarge := int64((64 << 20) + 1)
-	if _, err := suitematerial.LoadArchive(t.Context(), zeroReaderAt{}, tooLarge, suitematerial.Selection{MemberID: "writer"}); refusalCode(t, err) != suitematerial.RefusalLimit {
+	if _, err := suiteview.LoadArchive(t.Context(), zeroReaderAt{}, tooLarge, suiteview.Selection{MemberID: "writer"}); refusalCode(t, err) != suiteview.RefusalLimit {
 		t.Fatalf("archive size budget ignored: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := suitematerial.LoadArchive(ctx, panicReaderAt{}, 0, suitematerial.Selection{MemberID: "writer"}); refusalCode(t, err) != suitematerial.RefusalCanceled || !errors.Is(err, context.Canceled) {
+	if _, err := suiteview.LoadArchive(ctx, panicReaderAt{}, 0, suiteview.Selection{MemberID: "writer"}); refusalCode(t, err) != suiteview.RefusalCanceled || !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation identity lost: %v", err)
 	}
 	deadline, cancelDeadline := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancelDeadline()
-	if _, err := suitematerial.LoadArchive(deadline, panicReaderAt{}, 0, suitematerial.Selection{MemberID: "writer"}); refusalCode(t, err) != suitematerial.RefusalCanceled || !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := suiteview.LoadArchive(deadline, panicReaderAt{}, 0, suiteview.Selection{MemberID: "writer"}); refusalCode(t, err) != suiteview.RefusalCanceled || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("deadline identity lost: %v", err)
 	}
-	if _, err := suitematerial.LoadArchive(t.Context(), nil, 0, suitematerial.Selection{MemberID: "writer"}); refusalCode(t, err) != suitematerial.RefusalArtifact {
+	if _, err := suiteview.LoadArchive(t.Context(), nil, 0, suiteview.Selection{MemberID: "writer"}); refusalCode(t, err) != suiteview.RefusalArtifact {
 		t.Fatalf("nil archive accepted: %v", err)
 	}
-	if _, err := suitematerial.LoadArchive(t.Context(), bytes.NewReader([]byte("short")), 1024, suitematerial.Selection{MemberID: "writer"}); refusalCode(t, err) != suitematerial.RefusalArtifact {
+	if _, err := suiteview.LoadArchive(t.Context(), bytes.NewReader([]byte("short")), 1024, suiteview.Selection{MemberID: "writer"}); refusalCode(t, err) != suiteview.RefusalArtifact {
 		t.Fatalf("short archive accepted: %v", err)
 	}
 	for _, tc := range []struct {
 		records []archiveRecord
-		want    suitematerial.RefusalCode
+		want    suiteview.RefusalCode
 	}{
-		{[]archiveRecord{regular("oci-layout", strings.Repeat(" ", 1025))}, suitematerial.RefusalLimit},
-		{[]archiveRecord{regular("oci-layout", `{"imageLayoutVersion":"1.0.0"}`), regular("index.json", strings.Repeat(" ", (1<<20)+1))}, suitematerial.RefusalLimit},
+		{[]archiveRecord{regular("oci-layout", strings.Repeat(" ", 1025))}, suiteview.RefusalLimit},
+		{[]archiveRecord{regular("oci-layout", `{"imageLayoutVersion":"1.0.0"}`), regular("index.json", strings.Repeat(" ", (1<<20)+1))}, suiteview.RefusalLimit},
 	} {
 		raw := makeArchive(t, tc.records)
-		if _, err := suitematerial.LoadArchive(t.Context(), bytes.NewReader(raw), int64(len(raw)), suitematerial.Selection{MemberID: "writer"}); refusalCode(t, err) != tc.want {
+		if _, err := suiteview.LoadArchive(t.Context(), bytes.NewReader(raw), int64(len(raw)), suiteview.Selection{MemberID: "writer"}); refusalCode(t, err) != tc.want {
 			t.Fatalf("oversized metadata accepted: %v", err)
 		}
 	}
@@ -268,7 +338,7 @@ func TestLoadRejectsOCIEnvelopeParserDifferentials(t *testing.T) {
 			if _, err := agentsuite.ValidatePath(layout); err == nil {
 				t.Fatal("fixture does not demonstrate an upstream validation refusal")
 			}
-			if _, err := suitematerial.LoadLayout(t.Context(), layout, suitematerial.Selection{MemberID: "writer"}); refusalCode(t, err) != suitematerial.RefusalArtifact {
+			if _, err := suiteview.LoadLayout(t.Context(), layout, suiteview.Selection{MemberID: "writer"}); refusalCode(t, err) != suiteview.RefusalArtifact {
 				t.Fatalf("malformed envelope accepted: %v", err)
 			}
 		})
@@ -284,7 +354,7 @@ func TestLoadArchiveRequiresPhysicalTerminator(t *testing.T) {
 	if len(raw) < 1024 || len(bytes.Trim(raw[len(raw)-1024:], "\x00")) != 0 {
 		t.Fatal("fixture does not end with an all-zero file payload")
 	}
-	if _, err := suitematerial.LoadArchive(t.Context(), bytes.NewReader(raw), int64(len(raw)), suitematerial.Selection{MemberID: "writer"}); refusalCode(t, err) != suitematerial.RefusalArtifact {
+	if _, err := suiteview.LoadArchive(t.Context(), bytes.NewReader(raw), int64(len(raw)), suiteview.Selection{MemberID: "writer"}); refusalCode(t, err) != suiteview.RefusalArtifact {
 		t.Fatalf("archive without terminator accepted: %v", err)
 	}
 }
@@ -303,7 +373,7 @@ func TestLoadAcceptsConformingSupplementalLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := suitematerial.LoadLayout(t.Context(), layout, suitematerial.Selection{ArtifactDigest: pushed.Descriptor.Digest.String(), MemberID: "writer"}); err != nil {
+	if _, err := suiteview.LoadLayout(t.Context(), layout, suiteview.Selection{ManifestDigest: pushed.Descriptor.Digest.String(), MemberID: "writer"}); err != nil {
 		t.Fatalf("conforming supplemental link refused: %v", err)
 	}
 }
@@ -318,15 +388,15 @@ func TestLoadReportsConsumerContentLimit(t *testing.T) {
 	if _, err := suiteoras.Push(t.Context(), source, layout, "large:v1"); err != nil {
 		t.Fatal("upstream validator did not accept the consumer-limit fixture", err)
 	}
-	if _, err := suitematerial.LoadLayout(t.Context(), layout, suitematerial.Selection{MemberID: "writer"}); refusalCode(t, err) != suitematerial.RefusalLimit {
+	if _, err := suiteview.LoadLayout(t.Context(), layout, suiteview.Selection{MemberID: "writer"}); refusalCode(t, err) != suiteview.RefusalLimit {
 		t.Fatalf("consumer content limit was not typed: %v", err)
 	}
 }
 
 func TestRefusalsDoNotEchoUntrustedPaths(t *testing.T) {
 	const canary = "private-canary-path"
-	_, err := suitematerial.LoadLayout(t.Context(), filepath.Join(t.TempDir(), canary), suitematerial.Selection{MemberID: "writer"})
-	if refusalCode(t, err) != suitematerial.RefusalArtifact || strings.Contains(err.Error(), canary) {
+	_, err := suiteview.LoadLayout(t.Context(), filepath.Join(t.TempDir(), canary), suiteview.Selection{MemberID: "writer"})
+	if refusalCode(t, err) != suiteview.RefusalArtifact || strings.Contains(err.Error(), canary) {
 		t.Fatalf("path escaped refusal boundary: %v", err)
 	}
 }
@@ -514,6 +584,25 @@ func copyTree(t *testing.T, source, destination string) {
 	}
 }
 
+func readFiles(t *testing.T, root string) map[string][]byte {
+	t.Helper()
+	files := map[string][]byte{}
+	if err := filepath.WalkDir(root, func(name string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		relative, err := filepath.Rel(root, name)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(relative)], err = os.ReadFile(name)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
 func rewriteModel(t *testing.T, source string, model agentsuite.ModelRequirement) {
 	t.Helper()
 	memberPath := filepath.Join(source, "agents", "writer.json")
@@ -547,6 +636,49 @@ func rewriteModel(t *testing.T, source string, model agentsuite.ModelRequirement
 	if err != nil {
 		t.Fatal(err)
 	}
+	rootBytes, err = agentsuite.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootPath, rootBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func annotateDescriptors(t *testing.T, source string) {
+	t.Helper()
+	memberPath := filepath.Join(source, "agents", "writer.json")
+	memberBytes, err := os.ReadFile(memberPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var member agentsuite.Agent
+	if agentsuite.Unmarshal(memberBytes, &member) != nil {
+		t.Fatal("decode member")
+	}
+	member.Instructions.Descriptor.Annotations = map[string]string{"instruction-note": "retained"}
+	memberBytes, err = agentsuite.Marshal(member)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(memberPath, memberBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rootPath := filepath.Join(source, "agentsuite.json")
+	rootBytes, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root agentsuite.Suite
+	if agentsuite.Unmarshal(rootBytes, &root) != nil {
+		t.Fatal("decode root")
+	}
+	root.Agents[0].Descriptor.Size = int64(len(memberBytes))
+	root.Agents[0].Descriptor.Digest, err = agentsuite.Digest(memberBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root.Agents[0].Descriptor.Annotations = map[string]string{"member-note": "retained"}
 	rootBytes, err = agentsuite.Marshal(root)
 	if err != nil {
 		t.Fatal(err)

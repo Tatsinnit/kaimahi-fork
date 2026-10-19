@@ -6,8 +6,9 @@ import (
 	"fmt"
 
 	agentsuite "github.com/agent-primitives/suite"
-	kmxsuite "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite"
 	suiteoras "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/oras"
+	"github.com/kaimahi-agents/kaimahi/pkg/suiteview"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // PackagedCase holds public JSON bytes bound by the member's evaluation index.
@@ -61,7 +62,7 @@ func Load(ctx context.Context, p *Prepared) (*NativeSuite, error) {
 	if hasRuntimeProfiles(files) {
 		return nil, ErrProfileSelectionRequired
 	}
-	return loadNativeFiles(ctx, files, p.Descriptor.Digest.String())
+	return loadNativeFiles(ctx, files, recipeArtifactIdentity(p.Descriptor))
 }
 
 // LoadArtifact validates the closed native profile from a digest-verified
@@ -83,7 +84,7 @@ func LoadArtifact(ctx context.Context, artifact *suiteoras.Artifact) (*NativeSui
 	if hasRuntimeProfiles(files) {
 		return nil, ErrProfileSelectionRequired
 	}
-	return loadNativeFiles(ctx, files, artifact.Descriptor().Digest.String())
+	return loadNativeFiles(ctx, files, recipeArtifactIdentity(artifact.Descriptor()))
 }
 
 // verificationFailed exposes only refusal reasons.
@@ -95,7 +96,11 @@ func verificationFailed(err error) error {
 	return errors.New("packaged native suite verification failed")
 }
 
-func loadNativeFiles(ctx context.Context, files map[string][]byte, digest string) (*NativeSuite, error) {
+func recipeArtifactIdentity(descriptor ocispec.Descriptor) suiteview.ArtifactIdentity {
+	return suiteview.ArtifactIdentity{MediaType: descriptor.MediaType, Digest: descriptor.Digest.String(), Size: descriptor.Size}
+}
+
+func loadNativeFiles(ctx context.Context, files map[string][]byte, artifact suiteview.ArtifactIdentity) (*NativeSuite, error) {
 	var suite agentsuite.Suite
 	if err := agentsuite.Unmarshal(files["agentsuite.json"], &suite); err != nil {
 		return nil, errors.New("invalid packaged suite manifest")
@@ -108,39 +113,43 @@ func loadNativeFiles(ctx context.Context, files map[string][]byte, digest string
 	if err != nil {
 		return nil, errors.New("invalid packaged graph identity")
 	}
-	return loadNativeMember(ctx, files, suite, native, profile, digest, graphDigest, 0)
+	return loadNativeMember(ctx, files, suite, native, profile, artifact, graphDigest, 0)
 }
 
-func loadNativeMember(ctx context.Context, files map[string][]byte, suite agentsuite.Suite, native nativeRecord, profile RuntimeProfile, digest, graphDigest string, index int) (*NativeSuite, error) {
+func loadNativeMember(ctx context.Context, files map[string][]byte, suite agentsuite.Suite, native nativeRecord, profile RuntimeProfile, artifact suiteview.ArtifactIdentity, graphDigest string, index int) (*NativeSuite, error) {
 	if index < 0 || index >= len(suite.Agents) {
 		return nil, errors.New("invalid packaged native member")
 	}
-	material, err := kmxsuite.ProjectMember(ctx, files, digest, suite.Agents[index].ID)
+	recipe, err := suiteview.ProjectMember(ctx, files, suite.Agents[index].ID)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		return nil, errors.New("invalid packaged native member")
 	}
-	if material.GraphDigest != graphDigest {
+	if recipe.Suite.GraphDigest != graphDigest {
 		return nil, errors.New("invalid packaged native member")
 	}
-	cases, _, err := packagedCases(files, material.Agent)
+	var agent agentsuite.Agent
+	if err := agentsuite.Unmarshal(files[suite.Agents[index].Path], &agent); err != nil {
+		return nil, errors.New("invalid packaged native member")
+	}
+	cases, _, err := packagedCases(files, agent)
 	if err != nil {
 		return nil, errors.New("invalid packaged native evaluation cases")
 	}
 	// All entry points guarantee complete ordered cases and a caller-owned map
 	// of verified bytes; inventory loaders pass the selected member's index.
 	result := &NativeSuite{
-		Digest:             material.ArtifactDigest,
-		GraphDigest:        material.GraphDigest,
-		Name:               material.SuiteName,
-		MemberID:           material.MemberID,
-		Description:        material.Description,
-		Model:              material.Model.Model,
-		Instructions:       material.Instructions,
-		MemberDigest:       material.MemberDescriptor.Digest,
-		InstructionsDigest: material.InstructionsDescriptor.Digest,
+		Digest:             artifact.Digest,
+		GraphDigest:        recipe.Suite.GraphDigest,
+		Name:               recipe.Suite.Name,
+		MemberID:           recipe.Member.ID,
+		Description:        recipe.Description,
+		Model:              recipe.Model.Model,
+		Instructions:       recipe.Instructions,
+		MemberDigest:       recipe.Member.Descriptor.Digest,
+		InstructionsDigest: recipe.InstructionsDescriptor.Digest,
 		CompositionDigest:  suite.Compositions[index].Descriptor.Digest,
 		BuildProfileDigest: suite.BuildProfiles[0].Descriptor.Digest,
 		RendererVersion:    native.RendererVersion,
@@ -149,9 +158,9 @@ func loadNativeMember(ctx context.Context, files map[string][]byte, suite agents
 		Cases:              cases,
 		RequiredImages:     []string{},
 	}
-	if material.Agent.Policy != nil {
-		ref := *material.Agent.Policy
-		result.Policy = &NativePolicy{Path: ref.Path, Descriptor: ref.Descriptor, Bytes: files[ref.Path]}
+	if agent.Policy != nil {
+		ref := *agent.Policy
+		result.Policy = &NativePolicy{Path: ref.Path, Descriptor: ref.Descriptor, Bytes: append([]byte(nil), files[ref.Path]...)}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err

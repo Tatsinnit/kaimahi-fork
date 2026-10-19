@@ -1,6 +1,6 @@
 //go:build windows
 
-package materialio
+package localartifact
 
 import "syscall"
 

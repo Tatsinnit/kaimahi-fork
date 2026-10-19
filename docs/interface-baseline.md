@@ -146,7 +146,7 @@ and retains its own alpha lifecycle area:
 1. `github.com/agent-primitives/suite` is the separate portable format module:
    model, media types, canonical JSON, schemas, offline validation and semantic
    diff. Consumers import it explicitly as `agentsuite`.
-2. `pkg/suitematerial/` is a concrete local OCI layout/archive loader for one
+2. `pkg/suiteview/` is a concrete local OCI layout/archive loader for one
    explicit member. It returns copied instructions, the complete portable model
    requirement and exact artifact/graph/member/instruction identities with typed
    safe refusals. It has no runtime, evidence, registry or mutation authority.
