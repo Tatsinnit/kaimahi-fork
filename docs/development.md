@@ -212,6 +212,24 @@ commands/assets, not kagent vocabulary or version claims. It uses bounded litera
 command tokenization and exact inert exceptions; production command tests own
 runtime selection and supported-operation validation.
 
+### Release retention boundary
+
+Complete fresh Orka Lift creates retain a shared UID-bound baseline and a new
+explicit private ownership proof; reused/mixed placements never enroll. Private
+observation slots `intent.json` through `3.json` alone remain non-authoritative.
+Pre-reserved `4.json` additionally binds an acknowledged shared completion before
+any later operation can use that proof. Unknown writes/checkpoints cannot be
+resolved by re-reading live objects or by an automatic resend/takeover. Only a
+live writer whose object writes have ceased may persist a known partial and
+release its reservation. Pending/partial shared proof never rolls; completed
+history rolls at ten entries within 64 KiB. See
+[retention and operator recovery](suite-workspace.md#release-retention-and-operator-recovery).
+The update/rollback backend remains private and unwired to CLI flags. Its tests
+must distinguish same-digest no-write, fresh-RV-without-new-authority, old/new
+known partials, a separate client/private home, and lost final acknowledgments.
+Pinned API characterization is necessary but does not substitute for complete
+Lift/retention qualification or prove a model answer. Keep existing CI budgets.
+
 ### Local loop
 
 ```bash
@@ -270,6 +288,19 @@ no-effect model-mismatch refusal. Its offline reference uses the shared native
 scaffold, not removed live-create flags. Evaluation is not retried; broader
 promotion, absent creation and partial paths remain unqualified.
 Quickstart independently verifies placement before its separate fresh answer Task.
+
+The Orka runtime shard also runs `TestReleaseUpdatePinnedRV` and
+`TestReleaseStatePinnedCAS` with `KMX_RELEASE_UPDATE_LIVE=1` and
+`KMX_LIVE_KIND_CONTEXT=kind-kmx-orka`. These opt-in tests require the exact
+pinned chart/controller and a verified loopback API. They characterize status-only
+resourceVersion churn, isolated generation/spec preconditions, current-generation
+readiness and a shared ConfigMap reservation's UID/RV/data CAS. A synthetic
+local-only prerequisite and unusable inference endpoint keep these checks free of
+model execution; they do not authorize or enable user-facing Lift updates.
+For local qualification, use a separately owned `kind-kmx-update-proof` cluster
+with the pinned installer, never a demo or shared destination. The tests leave
+freshly named fixtures for the owned cluster's teardown; they never delete an
+occupied record or take over a reservation.
 
 The checkout-only [kagent qualification shell](../scripts/ci/kagent-lift.sh)
 retains exact v0.10.3 bootstrap, raw upstream Tool smoke and a direct single A2A
