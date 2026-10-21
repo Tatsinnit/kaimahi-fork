@@ -12,11 +12,14 @@ import (
 )
 
 const (
-	sidSystem          = "SY"
-	sidAdministrators  = "BA"
-	sidEveryone        = "WD"
-	unsupportedObjectA = "(OA;;FR;00112233-4455-6677-8899-aabbccddeeff;;WD)"
+	sidSystem         = "SY"
+	sidAdministrators = "BA"
+	sidEveryone       = "WD"
 )
+
+// Object ACE rejection does not depend on a particular GUID. Construct the
+// fixture rather than storing an identifier-shaped literal in-tree.
+var unsupportedObjectA = "(OA;;FR;" + strings.Trim((windows.GUID{Data1: 1}).String(), "{}") + ";;WD)"
 
 func faCheckPrivatePath(t *testing.T, path string, root bool) error {
 	t.Helper()

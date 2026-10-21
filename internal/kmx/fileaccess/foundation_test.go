@@ -60,6 +60,9 @@ func TestOpenDirectoryOpensExistingDirectory(t *testing.T) {
 
 func TestOpenDirectoryRelativePath(t *testing.T) {
 	dir := t.TempDir()
+	// The checkout and temporary directory may be on different Windows
+	// volumes. Relative-path coverage needs a same-volume working directory.
+	t.Chdir(filepath.Dir(dir))
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)

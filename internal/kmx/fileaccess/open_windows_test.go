@@ -180,6 +180,7 @@ func TestOpenDirectoryAliasesShareIdentityAndLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := filepath.Dir(dir)
+	t.Chdir(base) // Hosted checkout and TEMP may live on different volumes.
 	aliases := map[string][2]string{
 		"Extended":     {`\\?\` + dir, "LockFileWithLongName.lock"},
 		"Case":         {base + `\LONGDIRECTORYNAMEFORALIAS`, "lockfilewithlongname.LOCK"},
@@ -190,9 +191,11 @@ func TestOpenDirectoryAliasesShareIdentityAndLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rel, err := filepath.Rel(wd, dir); err == nil {
-		aliases["Relative"] = [2]string{rel, "LockFileWithLongName.lock"}
+	rel, err := filepath.Rel(wd, dir)
+	if err != nil {
+		t.Fatalf("relative fixture on the same volume: %v", err)
 	}
+	aliases["Relative"] = [2]string{rel, "LockFileWithLongName.lock"}
 	for name, alias := range aliases {
 		t.Run(name, func(t *testing.T) { faCheckAlias(t, alias[0], alias[1], dir, want) })
 	}
