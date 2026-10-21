@@ -24,6 +24,21 @@ to do. Sections: **Added**, **Changed**, **Fixed**, **Breaking**, **Upgrading**.
 
 ### Added
 
+- Read-only `kmx model list [-o table|json]` discovers cached Foundry Local
+  models at the runtime-reported endpoint and installed Ollama models on loopback
+  port 11434. Absent, empty, installed and failure states include explicit install
+  guidance. Non-secret routes are independent of kind reuse; no runtime start,
+  model download, automatic selection or local agent execution is added. Native
+  package tests cover Windows/macOS/Linux; Windows CLI qualification follows
+  native CLI support.
+
+- Offline canonical single-file charter parser with exact Model/Preferred,
+  separated inline Examples, existing assertion semantics, source locations,
+  bounded regular-file loading and a greeter sample. Standalone files and
+  matching `.squad/agents/<id>/charter.md` placements share one format. No
+  execution command, model access, source writes, Squad registration or native
+  suite-loader change is enabled; see [the format](docs/agent-file.md).
+
 - Native Windows CLI builds and future bare `.exe` release assets for amd64 and
   arm64. Native amd64 NTFS tests cover private ACLs, physical-alias locks,
   durable-publication API ordering and offline create/local-push/pull validation;

@@ -6,6 +6,12 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md), the
 
 ## Command consistency
 
+- `model list [-o table|json]` is config-free bounded local model discovery,
+  not cluster setup or inference. Keep `internal/kmx/modelaccess` independent of
+  App and Unix-only helpers. Foundry endpoint comes only from runtime status;
+  no fixed port, catalog download, service start or silent model selection.
+  Native model-access package tests are separate from Windows CLI qualification.
+
 - Follow the [command conventions](docs/command-conventions.md), the implemented
   interface in [docs/kmx.md](docs/kmx.md) and the
   [command alignment record](docs/command-semantics.md). Track outstanding
@@ -392,6 +398,17 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md), the
   updating current examples. Do not bulk-rename historical text or serialized
   state. Generated recovery commands must preserve the invoking executable,
   selectors and shell quoting.
+
+## Single-file charter boundary
+
+`internal/kmx/agentfile` parses only the canonical shape in
+[agent-file.md](docs/agent-file.md), offline, with Examples excluded from
+instructions and exact-byte revisions. Reuse runtime assertion semantics;
+refuse tools and unsupported declarations. Parse/Load grant no execution,
+trusted route, source-write, Squad registration or native suite-loader authority.
+Keep payload-bearing parsed values out of default logs/results. The loader
+refuses static special files and symlink/reparse path components; it is not a hostile
+concurrent filesystem sandbox.
 
 ## Offline multi-member workspace boundary
 
