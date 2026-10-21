@@ -11,7 +11,7 @@ func TestReleaseLiftStoragePreflightExistingLockReadOnlyDirectory(t *testing.T) 
 	if os.Geteuid() == 0 {
 		t.Skip("requires ordinary filesystem permission enforcement")
 	}
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	if err := preflightReleaseLiftStorage(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestReleaseLiftStoragePreflightExistingLockReadOnlyDirectory(t *testing.T) 
 }
 
 func TestReleaseLiftStorageWritableProbeLeavesNoAttempt(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	if err := preflightReleaseLiftStorage(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestReleaseLiftStorageWritableProbeLeavesNoAttempt(t *testing.T) {
 }
 
 func TestReleaseApplyFixtureDoesNotWriteAmbientState(t *testing.T) {
-	ambient := t.TempDir()
+	ambient := privateSuiteDir(t)
 	t.Setenv("KMX_HOME", ambient)
 	a, _, opt, _ := releaseApplyFixture(t, "both")
 	p, err := a.PrepareReleaseLift(t.Context(), opt)

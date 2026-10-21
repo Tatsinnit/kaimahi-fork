@@ -1,13 +1,12 @@
 package app
 
 import (
-	"os"
 	"reflect"
 	"testing"
 )
 
 func TestLiftPreferencesPersistScopedSelections(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	for scope, value := range map[string]string{"subscription": "sub-a", "cluster/sub-a": "rg/cluster", "cluster/sub-b": "rg/other", "context": "aks-context"} {
 		if err := saveLiftPreference(scope, value); err != nil {
 			t.Fatal(err)
@@ -21,10 +20,7 @@ func TestLiftPreferencesPersistScopedSelections(t *testing.T) {
 		t.Fatalf("prefs=%v", prefs)
 	}
 	path, _ := liftPreferencesPath()
-	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0600 {
-		t.Fatalf("permissions=%v err=%v", info, err)
-	}
+	requirePrivateFileForTest(t, path)
 }
 
 func TestRecentLiftItemsPrioritizeIdentityWithoutChangingSource(t *testing.T) {

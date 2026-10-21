@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/workspace"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/scaffold"
 )
 
@@ -146,7 +147,7 @@ func (a *App) authorQuickstartSource(ctx context.Context, opt CreateOptions) (st
 	if err != nil {
 		return "", err
 	}
-	stage, err := os.MkdirTemp(base, "instructions-")
+	stage, err := fileaccess.PrivateTempDir(base, "instructions-")
 	if err != nil {
 		return "", err
 	}
@@ -156,14 +157,14 @@ func (a *App) authorQuickstartSource(ctx context.Context, opt CreateOptions) (st
 		return "", err
 	}
 	input := filepath.Join(stage, "instructions.md")
-	if err := os.WriteFile(input, []byte(instructions), 0600); err != nil {
+	if err := fileaccess.WritePrivateFile(input, []byte(instructions), 0600); err != nil {
 		return "", err
 	}
 	source := workspace.CreateOptions{Name: opt.Name, Description: opt.Description, Model: opt.Model, InstructionsFile: input}
 	if err := workspace.ValidateCreateOptions(source); err != nil {
 		return "", err
 	}
-	root, err := os.MkdirTemp(base, opt.Name+"-")
+	root, err := fileaccess.PrivateTempDir(base, opt.Name+"-")
 	if err != nil {
 		return "", err
 	}

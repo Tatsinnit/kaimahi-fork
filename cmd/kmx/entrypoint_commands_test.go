@@ -11,7 +11,7 @@ import (
 )
 
 func TestRemovedRootAliasesRejectBeforeConfiguration(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	for _, path := range [][]string{{"up"}, {"down"}} {
 		for _, suffix := range [][]string{nil, {"--help"}, {"--unknown-flag"}} {
 			args := append(append([]string(nil), path...), suffix...)
@@ -120,24 +120,30 @@ func entrypointTools(t *testing.T) string {
 	t.Setenv("KMX_HOME", filepath.Join(dir, "state"))
 	t.Setenv("KMX_TOOLCHAIN", "off")
 	t.Setenv("PATH", dir)
-	tools := map[string]string{
-		"kubectl": `printf 'kubectl %s\n' "$*" >> "$KMX_ENTRYPOINT_LOG"
+	tools := map[string]struct {
+		script string
+		native fakeTool
+	}{
+		"kubectl": {`printf 'kubectl %s\n' "$*" >> "$KMX_ENTRYPOINT_LOG"
 case "$*" in
   'config view -o json') printf '%s' '{"current-context":"unrelated","clusters":[{"name":"c","cluster":{"server":"https://127.0.0.1:6443"}},{"name":"remote","cluster":{"server":"https://example.invalid"}}],"contexts":[{"name":"kind-demo","context":{"cluster":"c"}},{"name":"remote team","context":{"cluster":"remote"}}]}' ;;
 esac
-`,
-		"kind": `printf 'kind %s engine=%s\n' "$*" "$KIND_EXPERIMENTAL_PROVIDER" >> "$KMX_ENTRYPOINT_LOG"
+`, fakeTool{Log: log, LogLine: "kubectl ${ARGS}", Rules: []fakeToolRule{
+			{Match: "exact", Args: "config view -o json", Stdout: `{"current-context":"unrelated","clusters":[{"name":"c","cluster":{"server":"https://127.0.0.1:6443"}},{"name":"remote","cluster":{"server":"https://example.invalid"}}],"contexts":[{"name":"kind-demo","context":{"cluster":"c"}},{"name":"remote team","context":{"cluster":"remote"}}]}`},
+		}}},
+		"kind": {`printf 'kind %s engine=%s\n' "$*" "$KIND_EXPERIMENTAL_PROVIDER" >> "$KMX_ENTRYPOINT_LOG"
 case "$*" in
   version) printf 'kind v0.27.0\n' ;;
   'get clusters') printf 'demo\n' ;;
 esac
-`,
-		"podman": `printf 'podman %s\n' "$*" >> "$KMX_ENTRYPOINT_LOG"`,
+`, fakeTool{Log: log, LogLine: "kind ${ARGS} engine=${KIND_EXPERIMENTAL_PROVIDER}", Rules: []fakeToolRule{
+			{Match: "exact", Args: "version", Stdout: "kind v0.27.0\n"},
+			{Match: "exact", Args: "get clusters", Stdout: "demo\n"},
+		}}},
+		"podman": {`printf 'podman %s\n' "$*" >> "$KMX_ENTRYPOINT_LOG"`, fakeTool{Log: log, LogLine: "podman ${ARGS}"}},
 	}
-	for name, body := range tools {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body+"\n"), 0700); err != nil {
-			t.Fatal(err)
-		}
+	for name, tool := range tools {
+		installFakeTool(t, dir, name, "#!/bin/sh\n"+tool.script+"\n", tool.native)
 	}
 	return log
 }

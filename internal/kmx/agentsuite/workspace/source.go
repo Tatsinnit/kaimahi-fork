@@ -9,16 +9,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/scaffold"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/secretshapes"
 	"go.yaml.in/yaml/v3"
@@ -282,6 +281,9 @@ func Create(ctx context.Context, root string, opt CreateOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := fileaccess.RefuseWindowsDriveMount(root); err != nil {
+		return err
+	}
 	m, instructions, err := createInput(opt)
 	if err != nil {
 		return err
@@ -319,7 +321,7 @@ func createSourceFiles(ctx context.Context, root string, files map[string][]byte
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
+	if err := ensureWorkspaceRoot(root); err != nil {
 		return err
 	}
 	r, err := os.OpenRoot(root)
@@ -332,7 +334,7 @@ func createSourceFiles(ctx context.Context, root string, files map[string][]byte
 			return fmt.Errorf("refusing existing workspace/member/bundle path %s", name)
 		}
 	}
-	stage, err := os.MkdirTemp(root, ".kmx-create-*")
+	stage, err := fileaccess.PrivateTempDir(root, ".kmx-create-*")
 	if err != nil {
 		return err
 	}
@@ -340,51 +342,7 @@ func createSourceFiles(ctx context.Context, root string, files map[string][]byte
 	if err := writeFiles(stage, files); err != nil {
 		return err
 	}
-	var owned []string
-	published := false
-	defer func() {
-		if !published {
-			for _, name := range owned {
-				_ = r.RemoveAll(name)
-			}
-		}
-	}()
-	for _, name := range slices.Sorted(maps.Keys(dirs)) {
-		if err := r.Mkdir(name, 0o700); err != nil {
-			return err
-		}
-		owned = append(owned, name)
-	}
-	for name := range files {
-		if name == "workspace.yaml" {
-			continue
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := r.Link(filepath.Base(stage)+"/"+name, name); err != nil {
-			return err
-		}
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := r.Link(filepath.Base(stage)+"/workspace.yaml", "workspace.yaml"); err != nil {
-		return err
-	}
-	published = true
-	return nil
-}
-func writeFiles(root string, files map[string][]byte) error {
-	for name, b := range files {
-		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(name)), 0o700); err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(root, name), b, 0o600); err != nil {
-			return err
-		}
-	}
-	return nil
+	return publishSourceFiles(ctx, r, root, stage, dirs, files)
 }
 
 func strictYAML(b []byte, out any) error { return strictSourceYAML(b, out, false) }

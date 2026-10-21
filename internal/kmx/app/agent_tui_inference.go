@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/config"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/guard"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/scaffold"
 )
@@ -59,7 +60,7 @@ func loadConsoleInference(env agentTUIEnvironment, agent agentTUIAgent) (*consol
 	if err != nil {
 		return nil, err
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := readPrivatePreference(path)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -85,7 +86,7 @@ func saveConsoleInference(env agentTUIEnvironment, agent agentTUIAgent, source *
 		return err
 	}
 	if source == nil {
-		err = os.Remove(path)
+		err = removePrivatePreference(path)
 		if os.IsNotExist(err) {
 			return nil
 		}
@@ -97,7 +98,7 @@ func saveConsoleInference(env agentTUIEnvironment, agent agentTUIAgent, source *
 	if err = source.validate(); err != nil {
 		return err
 	}
-	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err = fileaccess.EnsurePrivatePath(filepath.Dir(path)); err != nil {
 		return err
 	}
 	raw, err := json.MarshalIndent(source, "", "  ")

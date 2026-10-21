@@ -2,6 +2,7 @@ package toolchain
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
@@ -11,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -19,6 +21,26 @@ import (
 func digestOf(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// managedDir is a fresh directory for state kmx manages itself. Native
+// Windows production code requires a private root it creates (or verifies)
+// itself, so the Windows fixture is a NEW child rather than t.TempDir's
+// inherited ACL. Elsewhere it is the temporary directory, as before.
+func managedDir(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return filepath.Join(t.TempDir(), "kmx-managed")
+	}
+	return t.TempDir()
+}
+
+// commandFile is the on-disk name exec.LookPath resolves a command to.
+func commandFile(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
 }
 
 func tarGz(t *testing.T, member string, body []byte) []byte {
@@ -34,6 +56,37 @@ func tarGz(t *testing.T, member string, body []byte) []byte {
 	}
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+type zipEntry struct {
+	name string
+	body []byte
+	mode os.FileMode
+}
+
+func zipOf(t *testing.T, entries ...zipEntry) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, entry := range entries {
+		header := &zip.FileHeader{Name: entry.name, Method: zip.Deflate}
+		mode := entry.mode
+		if mode == 0 {
+			mode = 0o755
+		}
+		header.SetMode(mode)
+		w, err := zw.CreateHeader(header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(entry.body); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := zw.Close(); err != nil {
 		t.Fatal(err)
@@ -116,6 +169,99 @@ func TestPinnedHelmUsesThePublishedArchiveAndChecksum(t *testing.T) {
 	}
 }
 
+// Native Windows assets as the upstreams actually publish them (verified
+// against the v1.37.0, v0.33.0 and v3.20.0 releases): kubectl is a bare
+// kubectl.exe with kubectl.exe.sha256 beside it; kind publishes ONLY an
+// amd64 binary, extensionless, with a .sha256sum; Helm publishes a .zip whose
+// .sha256sum covers the archive and whose member is helm.exe.
+func TestPinnedWindowsAssetsMatchThePublishers(t *testing.T) {
+	for _, goarch := range []string{"amd64", "arm64"} {
+		kubectl, ok := Pinned("kubectl", "windows", goarch)
+		asset := "https://dl.k8s.io/release/v1.37.0/bin/windows/" + goarch + "/kubectl.exe"
+		if !ok || kubectl.URL != asset || kubectl.ChecksumURL != asset+".sha256" || kubectl.ArchiveMember != "" {
+			t.Errorf("windows/%s: incorrect kubectl spec: %+v", goarch, kubectl)
+		}
+		helm, ok := Pinned("helm", "windows", goarch)
+		asset = "https://get.helm.sh/helm-v3.20.0-windows-" + goarch + ".zip"
+		if !ok || helm.URL != asset || helm.ChecksumURL != asset+".sha256sum" || helm.ArchiveMember != "windows-"+goarch+"/helm.exe" {
+			t.Errorf("windows/%s: incorrect Helm spec: %+v", goarch, helm)
+		}
+	}
+	kind, ok := Pinned("kind", "windows", "amd64")
+	asset := "https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-windows-amd64"
+	if !ok || kind.URL != asset || kind.ChecksumURL != asset+".sha256sum" || kind.ArchiveMember != "" {
+		t.Errorf("windows/amd64: incorrect kind spec: %+v", kind)
+	}
+	// kind v0.33.0 has no windows/arm64 asset. Substituting the amd64 build
+	// would be guessing; the operator puts their own kind on PATH.
+	if spec, ok := Pinned("kind", "windows", "arm64"); ok {
+		t.Errorf("windows/arm64 kind must have no pinned download, got %+v", spec)
+	}
+	// The Unix assets are unchanged by the Windows ones.
+	for _, platform := range []struct{ goos, goarch string }{{"linux", "amd64"}, {"linux", "arm64"}, {"darwin", "amd64"}, {"darwin", "arm64"}} {
+		kubectl, _ := Pinned("kubectl", platform.goos, platform.goarch)
+		if want := "https://dl.k8s.io/release/v1.37.0/bin/" + platform.goos + "/" + platform.goarch + "/kubectl"; kubectl.URL != want || kubectl.ChecksumURL != want+".sha256" {
+			t.Errorf("%s/%s: kubectl spec changed: %+v", platform.goos, platform.goarch, kubectl)
+		}
+		kind, ok := Pinned("kind", platform.goos, platform.goarch)
+		if want := "https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-" + platform.goos + "-" + platform.goarch; !ok || kind.URL != want || kind.ChecksumURL != want+".sha256sum" {
+			t.Errorf("%s/%s: kind spec changed: %+v", platform.goos, platform.goarch, kind)
+		}
+	}
+}
+
+// Helm's Windows archive is a zip. Like the tarball, the digest covers the
+// archive, so the archive is verified before it is parsed and only the
+// exact member is installed.
+func TestAWindowsZipToolIsVerifiedBeforeItIsExtracted(t *testing.T) {
+	binary := []byte("MZ pretend helm.exe")
+	spec, ok := Pinned("helm", "windows", "amd64")
+	if !ok {
+		t.Fatal("helm has no pinned windows archive")
+	}
+	archive := zipOf(t, zipEntry{name: "windows-amd64/", mode: os.ModeDir | 0o755}, zipEntry{name: "windows-amd64/LICENSE", body: []byte("license")}, zipEntry{name: spec.ArchiveMember, body: binary})
+	served := archive
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".sha256sum") {
+			fmt.Fprintf(w, "%s  %s\n", digestOf(archive), filepath.Base(spec.URL))
+			return
+		}
+		hits++
+		w.Write(served)
+	}))
+	defer srv.Close()
+
+	opt := Options{CacheDir: managedDir(t), BaseOverride: srv.URL}
+	path, err := Ensure(spec, opt)
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(binary) {
+		t.Errorf("installed %q, want the zip member %q", got, binary)
+	}
+
+	// A re-packed zip no longer matches the published digest and is refused
+	// before it is parsed; nothing new lands in the cache.
+	served = zipOf(t, zipEntry{name: spec.ArchiveMember, body: []byte("MZ pwned")})
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path + ".sha256"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Ensure(spec, opt); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("a re-packed zip was not refused by its checksum: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("a refused zip left a cache entry: %v", err)
+	}
+}
+
 // The whole mechanism, on a throwaway release: download, verify, cache,
 // re-verify, refuse a substituted cache entry, and leave nothing behind when
 // the digest does not match.
@@ -134,7 +280,7 @@ func TestEnsureDownloadsVerifiesCachesAndReVerifies(t *testing.T) {
 	defer srv.Close()
 
 	spec, _ := Pinned("kind", "linux", "amd64")
-	opt := Options{CacheDir: t.TempDir(), BaseOverride: srv.URL}
+	opt := Options{CacheDir: managedDir(t), BaseOverride: srv.URL}
 	path, err := Ensure(spec, opt)
 	if err != nil {
 		t.Fatalf("fetch failed: %v", err)
@@ -143,7 +289,8 @@ func TestEnsureDownloadsVerifiesCachesAndReVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode()&0o111 == 0 {
+	// Windows has no execute bit: the native test proves the .exe launches.
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 		t.Errorf("cached binary is not executable: %v", info.Mode())
 	}
 	// The cache key carries the version: a pin bump cannot be served the
@@ -203,7 +350,7 @@ func TestEnsureWritesNothingWhenTheChecksumFails(t *testing.T) {
 	defer srv.Close()
 
 	spec, _ := Pinned("kind", "linux", "amd64")
-	cache := t.TempDir()
+	cache := managedDir(t)
 	if _, err := Ensure(spec, Options{CacheDir: cache, BaseOverride: srv.URL}); err == nil {
 		t.Fatal("a mismatched download was accepted")
 	}
@@ -243,7 +390,7 @@ func TestAnArchivedToolIsVerifiedBeforeItIsExtracted(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	opt := Options{CacheDir: t.TempDir(), BaseOverride: srv.URL}
+	opt := Options{CacheDir: managedDir(t), BaseOverride: srv.URL}
 	path, err := Ensure(spec, opt)
 	if err != nil {
 		t.Fatalf("fetch failed: %v", err)
@@ -284,11 +431,11 @@ func TestProvisionPrefersWhatIsAlreadyOnPath(t *testing.T) {
 	for _, name := range []string{"kubectl", "helm"} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, commandFile(name)), []byte("#!/bin/sh\n"), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv("PATH", dir)
-			tools, err := Provision([]string{name}, t.TempDir(), Options{CacheDir: t.TempDir(), BaseOverride: "http://127.0.0.1:1"})
+			tools, err := Provision([]string{name}, managedDir(t), Options{CacheDir: managedDir(t), BaseOverride: "http://127.0.0.1:1"})
 			if err != nil {
 				t.Fatalf("provision failed: %v", err)
 			}
@@ -302,7 +449,7 @@ func TestProvisionPrefersWhatIsAlreadyOnPath(t *testing.T) {
 // Anything kmx cannot pin is named as such rather than downloaded blind.
 func TestProvisionRefusesAnUnknownTool(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	if _, err := Provision([]string{"docker"}, t.TempDir(), Options{CacheDir: t.TempDir()}); err == nil {
+	if _, err := Provision([]string{"docker"}, managedDir(t), Options{CacheDir: managedDir(t)}); err == nil {
 		t.Fatal("an unpinned tool was accepted for download")
 	}
 }
@@ -328,7 +475,7 @@ func TestASubstitutedCacheEntryIsReportedAsDownloadedNotCached(t *testing.T) {
 	defer srv.Close()
 
 	spec, _ := Pinned("kind", "linux", "amd64")
-	opt := Options{CacheDir: t.TempDir(), BaseOverride: srv.URL}
+	opt := Options{CacheDir: managedDir(t), BaseOverride: srv.URL}
 
 	path, source, err := EnsureReporting(spec, opt)
 	if err != nil {
@@ -362,6 +509,9 @@ func TestASubstitutedCacheEntryIsReportedAsDownloadedNotCached(t *testing.T) {
 
 // Provision reports what the fetch actually did, not what a Stat guessed.
 func TestProvisionReportsTheSourceTheFetchUsed(t *testing.T) {
+	if _, ok := Pinned("kind", runtime.GOOS, runtime.GOARCH); !ok {
+		t.Skipf("kind publishes no %s/%s asset, so Provision cannot fetch it here", runtime.GOOS, runtime.GOARCH)
+	}
 	t.Setenv("PATH", t.TempDir())
 	binary := []byte("#!/bin/sh\necho kind\n")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -373,7 +523,7 @@ func TestProvisionReportsTheSourceTheFetchUsed(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cache, link := t.TempDir(), t.TempDir()
+	cache, link := managedDir(t), managedDir(t)
 	opt := Options{CacheDir: cache, BaseOverride: srv.URL}
 	spec, _ := Pinned("kind", "linux", "amd64")
 

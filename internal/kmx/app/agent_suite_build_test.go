@@ -99,7 +99,7 @@ func TestBuildSuiteRejectsDirectoryOutput(t *testing.T) {
 }
 
 func minimalSuitePath() string {
-	return filepath.Join("..", "..", "..", "testdata", "agentsuite", "minimal")
+	return minimalSuiteFixture(filepath.Join("..", "..", "..", "testdata", "agentsuite", "minimal"))
 }
 
 type sandboxBuilderFunc func(context.Context, kmxsuite.SandboxPlan, io.Writer) (kmxsuite.BuildResult, error)

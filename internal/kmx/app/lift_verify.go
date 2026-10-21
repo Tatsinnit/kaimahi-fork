@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/lift"
@@ -35,7 +34,7 @@ func (a *App) readLiftRecord(group, cluster string) (*lift.Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(path)
+	f, err := openLiftRecordFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("no AKS infrastructure record for %s/%s (looked in %s): %w", group, cluster, filepath.Dir(path), err)
 	}

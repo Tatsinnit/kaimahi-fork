@@ -221,6 +221,7 @@ func TestWorkspacePolicyRefusesStaticSymlinkAndFIFO(t *testing.T) {
 				target := filepath.Join(root, "other.json")
 				writeFile(t, target, networkPolicy(""))
 				if err := os.Symlink(target, name); err != nil {
+					symlinkUnavailable(t, err)
 					t.Fatal(err)
 				}
 			} else {

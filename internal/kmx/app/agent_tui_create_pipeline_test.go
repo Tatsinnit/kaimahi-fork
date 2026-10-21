@@ -256,7 +256,7 @@ func TestConsoleCreationPartialResultVisibleAndReportedAfterClose(t *testing.T) 
 // Skipping destination consent, or reporting Ready merely after prepare, breaks
 // this model-stage test. Real operation tests below keep Apply/Verify unmocked.
 func TestConsoleCreationRequiresDestinationAndPlanReview(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	opt := nativeEvaluationOptions(t)
 	review, err := (&App{}).reviewSuiteWorkspace(t.Context(), opt.Workspace)
 	if err != nil {
@@ -328,7 +328,7 @@ func TestConsoleCreationRemoteConsentAndCancelledOperation(t *testing.T) {
 }
 
 func TestConsoleCreationFingerprintDriftBeforeExecution(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	opt := nativeEvaluationOptions(t)
 	review, err := (&App{}).reviewSuiteWorkspace(t.Context(), opt.Workspace)
 	if err != nil {

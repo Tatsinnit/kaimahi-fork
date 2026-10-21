@@ -46,9 +46,8 @@ func TestDestinationsCheckBoundariesAndIndependentFailures(t *testing.T) {
 			tools := t.TempDir()
 			log := filepath.Join(tools, "calls")
 			t.Setenv("KMX_CTX_LOG", log)
-			if err := os.WriteFile(filepath.Join(tools, "kubectl"), []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$KMX_CTX_LOG\"\nprintf 'kind-dev\\nremote team\\n'\n"), 0700); err != nil {
-				t.Fatal(err)
-			}
+			installFakeTool(t, tools, "kubectl", "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$KMX_CTX_LOG\"\nprintf 'kind-dev\\nremote team\\n'\n",
+				fakeTool{Log: log, LogLine: "${ARGS}", TruncateLog: true, Rules: []fakeToolRule{{Stdout: "kind-dev\nremote team\n"}}})
 			t.Setenv("PATH", tools)
 			t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
 			t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
@@ -98,7 +97,7 @@ targets:
   dev: {context: kind-dev, bindings: does-not-exist.yaml}
 `)
 	t.Setenv("PATH", t.TempDir())
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	for _, format := range []string{"table", "json"} {
 		var out, diagnostics bytes.Buffer
 		deps, loads := testDependencies(&out, &diagnostics)

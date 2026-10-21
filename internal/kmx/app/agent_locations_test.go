@@ -12,19 +12,13 @@ import (
 )
 
 func TestAgentLocationsPersistSeparateClustersPrivately(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	for _, cluster := range []string{"kind-local", "aks-remote"} {
 		location, err := writeAgentLocation(agentLocation{Agent: "demo", Namespace: OrkaNamespace, Context: cluster}, []byte("apiVersion: v1\n"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		info, err := os.Stat(location.Kubeconfig)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Mode().Perm() != 0600 {
-			t.Fatalf("kubeconfig permissions=%v", info.Mode())
-		}
+		requirePrivateFileForTest(t, location.Kubeconfig)
 	}
 	locations, err := loadAgentLocations()
 	if err != nil || len(locations) != 2 {
@@ -74,7 +68,7 @@ func TestFailedAgentSwitchKeepsConnection(t *testing.T) {
 }
 
 func TestPrivateAgentFileReplacesExistingFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.json")
+	path := filepath.Join(privateSuiteDir(t), "agent.json")
 	for _, contents := range []string{"initial kubeconfig contents", "new"} {
 		if err := writePrivateAgentFile(path, []byte(contents)); err != nil {
 			t.Fatal(err)
@@ -91,7 +85,7 @@ func TestPrivateAgentFileReplacesExistingFile(t *testing.T) {
 }
 
 func TestClusterDisplayUsesMetadataNotSubscriptionContext(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	contextName := "aks-subscription-guid-resource-group-cluster-with-hyphens"
 	if _, err := writeAgentLocation(agentLocation{Agent: "demo", Namespace: OrkaNamespace, Context: contextName, Cluster: "cluster-with-hyphens"}, nil); err != nil {
 		t.Fatal(err)

@@ -29,7 +29,7 @@ func flowCommandInputs(t *testing.T) []string {
 }
 
 func TestFlowCreateCommandOffline(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("CONTAINER_ENGINE", "not-an-engine")
 	var out, diagnostics bytes.Buffer

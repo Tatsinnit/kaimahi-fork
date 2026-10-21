@@ -5,8 +5,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
+
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 )
 
 // Source says where a provisioned tool came from.
@@ -40,11 +41,15 @@ type Tool struct {
 
 // Provision makes each named tool runnable and reports where each came from.
 //
-// linkDir gets a plain-named symlink for every tool that was NOT already on
+// linkDir gets a plain-named command for every tool that was NOT already on
 // PATH, and the caller prepends it to PATH. The cache itself cannot be used
 // for that: its entries carry the version in the name (`kind-0.33.0-linux-amd64`)
 // so that a pin bump can never be served the previous binary, and nothing
-// looks for a command under that name.
+// looks for a command under that name. On Unix that command is a symlink to
+// the cache entry. On Windows, where a symlink needs a privilege an ordinary
+// user lacks, it is <name>.exe: a private copy of the verified bytes,
+// atomically replaced so a pin bump never leaves the old binary runnable
+// under the plain name.
 //
 // Absent from this list, deliberately: the container engine. Docker and
 // Podman are a daemon, a system package and usually a privileged install —
@@ -54,6 +59,7 @@ type Tool struct {
 func Provision(names []string, linkDir string, opt Options) ([]Tool, error) {
 	goos, goarch := Platform()
 	var tools []Tool
+	linkDirChecked := false
 	for _, name := range names {
 		if path, err := exec.LookPath(name); err == nil {
 			tools = append(tools, Tool{Name: name, Path: path, Source: FromPath})
@@ -63,33 +69,32 @@ func Provision(names []string, linkDir string, opt Options) ([]Tool, error) {
 		if !ok {
 			return nil, fmt.Errorf("kmx has no pinned download for %q — install it and put it on PATH", name)
 		}
+		// The command directory is an output kmx writes executables into:
+		// checked once, before the first download, and only when something
+		// is actually going to be published there.
+		if !linkDirChecked {
+			if err := fileaccess.RefuseWindowsDriveMount(linkDir); err != nil {
+				return nil, err
+			}
+			if err := prepareManagedDir(linkDir); err != nil {
+				return nil, err
+			}
+			linkDirChecked = true
+		}
 		// The source comes back FROM the fetch, not from a Stat before it:
 		// an entry that exists may still be re-fetched, because one whose
 		// recorded digest no longer matches is deleted rather than run.
-		path, source, err := EnsureReporting(spec, opt)
+		path, binary, source, err := ensure(spec, opt)
 		if err != nil {
 			return nil, err
 		}
-		link := filepath.Join(linkDir, name)
-		if err := relink(link, path); err != nil {
+		link, err := publishAlias(linkDir, name, path, binary)
+		if err != nil {
 			return nil, err
 		}
 		tools = append(tools, Tool{Name: name, Path: link, Version: spec.Version, Source: source})
 	}
 	return tools, nil
-}
-
-// relink points linkDir/<name> at the versioned cache entry, replacing
-// whatever was there. Replacing rather than keeping is the point: after a pin
-// bump the old link would otherwise still be the thing on PATH.
-func relink(link, target string) error {
-	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
-		return err
-	}
-	if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return os.Symlink(target, link)
 }
 
 // PrependPath puts dir at the front of a PATH value. It is a no-op when dir

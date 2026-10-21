@@ -97,7 +97,7 @@ func TestAKSIsAbsentFromRootHelpAndCompletion(t *testing.T) {
 func TestSuiteValidateDoesNotLoadConfig(t *testing.T) {
 	var out, errOut bytes.Buffer
 	deps, loads := testDependencies(&out, &errOut)
-	err := execute([]string{"suite", "validate", t.TempDir()}, deps)
+	err := execute([]string{"suite", "validate", suiteInputDir(t)}, deps)
 	if err == nil || !strings.Contains(err.Error(), "agentsuite.json") {
 		t.Fatalf("validation error = %v", err)
 	}

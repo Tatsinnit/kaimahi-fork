@@ -74,7 +74,7 @@ func TestWorkspacePushHandlerDiscoveryAndPublicationIdentity(t *testing.T) {
 	}
 	root = unsafe
 	t.Chdir(root)
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	var out, diagnostics bytes.Buffer
 	a := &App{Out: &out, Err: &diagnostics}
 	var firstGraph string
@@ -144,7 +144,7 @@ func TestWorkspacePublicationIdentityContract(t *testing.T) {
 		{"case-only", before.Descriptor.Digest, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			state := t.TempDir()
+			state := privateSuiteDir(t)
 			t.Setenv("KMX_HOME", state)
 			if tc.name == "case-only" {
 				writeFile(t, filepath.Join(root, "eval/example.yaml"), "id: example\ninput: What is 3+3?\nexpectContains: [\"6\"]\n")

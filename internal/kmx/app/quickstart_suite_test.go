@@ -22,7 +22,7 @@ import (
 func TestQuickstartSuiteSourceRefusesAuthoredDrift(t *testing.T) {
 	for _, file := range []string{"agents/hello-world-agent/instructions.md", "eval/example.yaml"} {
 		t.Run(file, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateSuiteDir(t))
 			a := &App{Out: io.Discard, Err: io.Discard, Cfg: newQuickstartConfig()}
 			root, _, err := a.quickstartSuiteSource(t.Context())
 			if err != nil {
@@ -45,7 +45,7 @@ func TestQuickstartSuiteSourceRefusesAuthoredDrift(t *testing.T) {
 }
 
 func TestQuickstartSuiteSourceExactReuse(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	a := &App{Out: io.Discard, Err: io.Discard, Cfg: newQuickstartConfig()}
 	root, _, err := a.quickstartSuiteSource(t.Context())
 	if err != nil {

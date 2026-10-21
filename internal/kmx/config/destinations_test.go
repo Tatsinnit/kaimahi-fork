@@ -9,8 +9,12 @@ import (
 	"time"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/secretshapes"
-	"golang.org/x/sys/unix"
 )
+
+type unsafeDestinationCase struct {
+	name string
+	make func(t *testing.T, root, path string) string
+}
 
 func TestDestinationsStrictClosedDocument(t *testing.T) {
 	secret := secretshapes.All()[0].Example
@@ -62,32 +66,13 @@ func fmtYAMLEscape(b byte) string {
 	return "\\x" + string([]byte{hex[b>>4], hex[b&15]})
 }
 
+// unsafeDestinationCases (platform-tagged) replace kmx.yaml or its root with
+// a link, special file or namespace object and return the root to load.
 func TestDestinationsRejectLinksFIFOAndRootLinksWithoutBlocking(t *testing.T) {
-	for _, kind := range []string{"symlink", "fifo", "directory", "root link"} {
-		t.Run(kind, func(t *testing.T) {
+	for _, tc := range unsafeDestinationCases() {
+		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			path := filepath.Join(root, "kmx.yaml")
-			switch kind {
-			case "symlink":
-				other := filepath.Join(t.TempDir(), "config")
-				os.WriteFile(other, []byte("version: 1\n"), 0600)
-				if err := os.Symlink(other, path); err != nil {
-					t.Fatal(err)
-				}
-			case "fifo":
-				if err := unix.Mkfifo(path, 0600); err != nil {
-					t.Fatal(err)
-				}
-			case "directory":
-				if err := os.Mkdir(path, 0700); err != nil {
-					t.Fatal(err)
-				}
-			case "root link":
-				os.WriteFile(path, []byte("version: 1\n"), 0600)
-				link := filepath.Join(t.TempDir(), "link")
-				os.Symlink(root, link)
-				root = link
-			}
+			root = tc.make(t, root, filepath.Join(root, "kmx.yaml"))
 			done := make(chan error, 1)
 			go func() { _, err := LoadDestinations(root); done <- err }()
 			select {

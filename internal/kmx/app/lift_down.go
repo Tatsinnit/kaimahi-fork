@@ -379,7 +379,7 @@ func (a *App) forgetLiftRecord(opt lift.Options) {
 	if err != nil {
 		return
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if err := removePrivatePreference(path); err != nil && !os.IsNotExist(err) {
 		a.notef("could not remove the run record %s: %v", path, err)
 	}
 }

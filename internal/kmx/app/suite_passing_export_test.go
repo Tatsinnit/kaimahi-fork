@@ -10,15 +10,6 @@ import (
 	"testing"
 )
 
-func privateSuiteDir(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	return dir
-}
-
 func TestSuitePassingExportExclusiveCompletePrivate(t *testing.T) {
 	root, prepared, suite, placement, observations := passingFixture(t)
 	receipt, err := newSuitePassingReceipt(t.Context(), prepared, placement, observations)
@@ -166,6 +157,119 @@ func TestSuitePassingExportPreflightAndPublishRefusals(t *testing.T) {
 				t.Fatal("refusal published output", err)
 			}
 		})
+	}
+}
+
+func TestSuitePassingExportFileSyncFailureBeforePublication(t *testing.T) {
+	destination := filepath.Join(privateSuiteDir(t), "receipt.json")
+	export, err := preflightSuitePassingExport(t.Context(), destination, t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer export.Close()
+	raw := []byte("complete stage before file flush\n")
+	called := false
+	export.beforeFileSync = func(file *os.File) {
+		called = true
+		info, err := file.Stat()
+		if err != nil || info.Size() != int64(len(raw)) {
+			t.Fatalf("file flush reached before complete write: %v, %v", info, err)
+		}
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := export.publishBytes(t.Context(), raw); !errors.Is(err, errSuitePassingExport) {
+		t.Fatalf("file flush failure = %v, want publication refusal", err)
+	}
+	if !called || export.linked {
+		t.Fatalf("file flush fault not enforced before link: called=%v linked=%v", called, export.linked)
+	}
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		t.Fatalf("file flush failure published an output: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(destination))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("failed stage left residue: %v, %v", entries, err)
+	}
+}
+
+// The production publisher orders a complete write, a successful file flush,
+// the exclusive link and then the directory flush. The hooks observe the real
+// publisher at its own boundaries; the output stays invisible until the link.
+func TestSuitePassingExportRawPublicationOrder(t *testing.T) {
+	destination := filepath.Join(privateSuiteDir(t), "receipt.json")
+	export, err := preflightSuitePassingExport(t.Context(), destination, t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer export.Close()
+	raw := []byte("complete private publication\n")
+	var events []string
+	invisible := func(stage string) {
+		if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+			t.Errorf("output visible before %s: %v", stage, err)
+		}
+	}
+	export.beforeFileSync = func(file *os.File) {
+		info, err := file.Stat()
+		if err != nil || info.Size() != int64(len(raw)) {
+			t.Errorf("file flush reached before complete write: %v, %v", info, err)
+		}
+		invisible("file flush")
+		events = append(events, "written")
+	}
+	export.beforeLink = func() error {
+		invisible("link")
+		events = append(events, "file-flushed")
+		return nil
+	}
+	if err := export.publishBytes(t.Context(), raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(events, ",") != "written,file-flushed" || !export.linked {
+		t.Fatalf("publication order = %v linked=%v", events, export.linked)
+	}
+	if got, err := os.ReadFile(destination); err != nil || !bytes.Equal(got, raw) {
+		t.Fatalf("published bytes = %q, %v", got, err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(destination))
+	if err != nil || len(entries) != 1 || entries[0].Name() != "receipt.json" {
+		t.Fatalf("publication left stage residue: %v, %v", entries, err)
+	}
+}
+
+// A directory flush failure after the exclusive link leaves the complete
+// output visible but is never acknowledged as durable success.
+func TestSuitePassingExportDirectorySyncFailureAfterLink(t *testing.T) {
+	destination := filepath.Join(privateSuiteDir(t), "receipt.json")
+	export, err := preflightSuitePassingExport(t.Context(), destination, t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer export.Close()
+	raw := []byte("complete stage, directory flush fails\n")
+	closed := false
+	export.beforeLink = func() error {
+		closed = true
+		return export.directory.Close()
+	}
+	if err := export.publishBytes(t.Context(), raw); !errors.Is(err, errSuitePassingExport) {
+		t.Fatalf("directory flush failure = %v, want publication uncertainty", err)
+	}
+	if !closed || !export.linked {
+		t.Fatalf("directory flush fault not after link: closed=%v linked=%v", closed, export.linked)
+	}
+	info, err := os.Lstat(destination)
+	if err != nil || info.Size() == 0 {
+		t.Fatalf("linked output missing or empty: %v, %v", info, err)
+	}
+	if got, err := os.ReadFile(destination); err != nil || !bytes.Equal(got, raw) {
+		t.Fatalf("visible output incomplete = %q, %v", got, err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(destination))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("publication left stage residue: %v, %v", entries, err)
 	}
 }
 

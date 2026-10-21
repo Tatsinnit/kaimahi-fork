@@ -167,7 +167,7 @@ func TestAnExistingClusterAlsoRecordsTheInventedContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 
 	var out bytes.Buffer
 	a := &App{
@@ -200,7 +200,7 @@ case "$1 $2" in "get clusters") echo kaimahi-p1;; esac`)
 case "$*" in *"config view"*) printf '%s\n' '{"current-context":"other","contexts":[{"name":"other","context":{"cluster":"other"}}],"clusters":[{"name":"other","cluster":{"server":"https://example.test"}}]}' ;; esac`)
 	t.Setenv("PATH", dir)
 	t.Setenv("COMMAND_LOG", log)
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	var out bytes.Buffer
 	a := &App{Cfg: &config.Config{KindCluster: "kaimahi-p1", KubeContext: "kind-kaimahi-p1", ContextSource: config.SourceDefault, ContainerEngine: "docker"}, Run: &run.Runner{Stdout: &out, Stderr: &out}, Out: &out, Err: &out}
 	if err := a.stepCluster(); err != nil {
@@ -227,7 +227,7 @@ func TestAFailedClusterRecordsNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 
 	var out bytes.Buffer
 	a := &App{

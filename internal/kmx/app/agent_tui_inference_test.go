@@ -48,7 +48,7 @@ func TestConsoleInferenceLateResultsCannotReopenRetiredEditor(t *testing.T) {
 }
 
 func TestConsoleInferenceSourcePersistenceAndValidation(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	env := agentTUIEnvironment{Name: "kind-test", Local: true}
 	agent := agentTUIAgent{Name: "demo", Namespace: "agents", Runtime: "orka"}
 	source := consoleInferenceSource{Kind: "foundry", Name: "test", Endpoint: "https://example.openai.azure.com", Model: "test-model"}
@@ -60,10 +60,7 @@ func TestConsoleInferenceSourcePersistenceAndValidation(t *testing.T) {
 		t.Fatalf("loaded=%+v err=%v", loaded, err)
 	}
 	path, _ := consoleInferencePath(env, agent)
-	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0600 {
-		t.Fatal("metadata permissions incorrect")
-	}
+	requirePrivateFileForTest(t, path)
 	other, err := loadConsoleInference(agentTUIEnvironment{Name: "remote"}, agent)
 	if err != nil || other != nil {
 		t.Fatal("source leaked across environments")
@@ -135,7 +132,7 @@ esac`)
 }
 
 func TestConsoleRemoteInferenceNeverOffersOrLoadsHostSources(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	p := consoleInferencePane{env: agentTUIEnvironment{Name: "remote"}, agent: agentTUIAgent{Runtime: "orka"}, azureAvailable: true}
 	kinds := strings.Join(p.sourceKinds(), ",")
 	if strings.Contains(kinds, "copilot") || !strings.Contains(kinds, "foundry-cluster") || !strings.Contains(kinds, "azure") {

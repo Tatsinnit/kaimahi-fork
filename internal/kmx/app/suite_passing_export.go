@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/workspace"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/scaffold"
 )
 
@@ -24,6 +23,8 @@ type suitePassingExport struct {
 	linked       bool
 	publicParent bool
 	beforeLink   func() error
+	// A file-level fault boundary verifies failed flushes cannot reach Link.
+	beforeFileSync func(*os.File)
 }
 
 func preflightSuitePassingExport(ctx context.Context, destination, workspaceRoot, cacheRoot string) (*suitePassingExport, error) {
@@ -42,19 +43,24 @@ func preflightSuitePassingExportMode(ctx context.Context, destination, workspace
 	if scaffold.RefuseKeyShapes(destination) != nil || suiteReceiptInside(destination, workspaceRoot) || suiteReceiptInside(destination, cacheRoot) {
 		return nil, errSuitePassingFile
 	}
+	// Every output gets the Linux Windows-drive guard before any directory is
+	// anchored; its named-path remedy survives the generic refusal.
+	if err := fileaccess.RefuseWindowsDriveMount(destination); err != nil {
+		return nil, errors.Join(errSuitePassingFile, err)
+	}
 	root, name, parent, err := openSessionReferenceDirectory(destination)
 	if err != nil {
 		return nil, errSuitePassingFile
 	}
-	if !publicParent && parent.Mode().Perm()&0077 != 0 {
+	if !publicParent && !privateDirOK(root, parent) {
 		root.Close()
 		return nil, errSuitePassingFile
 	}
-	if _, err := root.Lstat(name); !os.IsNotExist(err) {
+	if !absentLeaf(root, name) {
 		root.Close()
 		return nil, errSuitePassingFile
 	}
-	directory, err := root.Open(".")
+	directory, err := fileaccess.OpenSyncDirectory(root)
 	if err != nil {
 		root.Close()
 		return nil, errSuitePassingFile
@@ -74,8 +80,9 @@ func (e *suitePassingExport) unchanged() error {
 	if err != nil {
 		return errSuitePassingExport
 	}
+	private := e.publicParent || privateDirOK(root, parent)
 	closeErr := root.Close()
-	if closeErr != nil || !e.publicParent && parent.Mode().Perm()&0077 != 0 || !os.SameFile(e.parent, parent) {
+	if closeErr != nil || !private || !os.SameFile(e.parent, parent) {
 		return errSuitePassingExport
 	}
 	return nil
@@ -108,7 +115,7 @@ func (e *suitePassingExport) publishBytes(ctx context.Context, raw []byte) (err 
 		return errSuitePassingExport
 	}
 	stage := ".native-receipt-" + suffix
-	file, err := e.root.OpenFile(stage, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	file, err := createPrivateFile(e.root, stage, os.O_CREATE|os.O_EXCL|os.O_WRONLY)
 	if err != nil {
 		return errSuitePassingExport
 	}
@@ -127,6 +134,9 @@ func (e *suitePassingExport) publishBytes(ctx context.Context, raw []byte) (err 
 		}
 	}()
 	_, writeErr := file.Write(raw)
+	if e.beforeFileSync != nil {
+		e.beforeFileSync(file)
+	}
 	syncErr := file.Sync()
 	closeErr := file.Close()
 	if errors.Join(writeErr, syncErr, closeErr) != nil {
@@ -184,7 +194,7 @@ func readSuitePassingReceipt(ctx context.Context, filename string) (receipt *sui
 	if err != nil {
 		return nil, errSuitePassingFile
 	}
-	if parent.Mode().Perm()&0077 != 0 {
+	if !privateDirOK(root, parent) {
 		root.Close()
 		return nil, errSuitePassingFile
 	}
@@ -231,25 +241,13 @@ func readSuitePassingReceipt(ctx context.Context, filename string) (receipt *sui
 	if openErr != nil {
 		return nil, errSuitePassingFile
 	}
+	private := privateDirOK(again, now)
 	closeErr := again.Close()
-	if currentErr != nil || closeErr != nil || now.Mode().Perm()&0077 != 0 || !current.Mode().IsRegular() || current.Mode().Perm()&0077 != 0 || !os.SameFile(info, current) || !os.SameFile(parent, now) {
+	if currentErr != nil || closeErr != nil || !private || !current.Mode().IsRegular() || !privateEntryOK(root, name, current) || !os.SameFile(info, current) || !os.SameFile(parent, now) {
 		return nil, errSuitePassingFile
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	return parseSuitePassingReceipt(raw)
-}
-
-func suiteReceiptInside(filename, tree string) bool {
-	absolute, err := filepath.Abs(filename)
-	if err != nil || tree == "" {
-		return true
-	}
-	root, err := filepath.Abs(tree)
-	if err != nil {
-		return true
-	}
-	relative, err := filepath.Rel(root, absolute)
-	return err != nil || relative == "." || relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }

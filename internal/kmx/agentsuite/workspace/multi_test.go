@@ -349,6 +349,7 @@ func TestMultiSourceLimitsAndConfinement(t *testing.T) {
 					t.Fatal(err)
 				}
 				if err := os.Symlink(real, p); err != nil {
+					symlinkUnavailable(t, err)
 					t.Fatal(err)
 				}
 			}

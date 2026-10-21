@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 )
 
 // Detection is local and read-only. Installation is not proof of authentication;
@@ -160,7 +162,7 @@ func copilotPromptModel(ctx context.Context, executable, model, prompt string) (
 	defer cancel()
 	// Avoid inheriting this checkout's instructions or working files. Credentials
 	// remain in the user's normal Copilot environment; no credential copying.
-	dir, err := os.MkdirTemp("", "kmx-copilot-")
+	dir, err := fileaccess.PrivateTempDir("", "kmx-copilot-")
 	if err != nil {
 		return "", err
 	}

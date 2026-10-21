@@ -22,7 +22,7 @@ import (
 
 func safeSuiteFixture(t *testing.T, source string) string {
 	t.Helper()
-	destination := t.TempDir()
+	destination := suiteInputDir(t)
 	if err := os.CopyFS(destination, os.DirFS(source)); err != nil {
 		t.Fatal(err)
 	}

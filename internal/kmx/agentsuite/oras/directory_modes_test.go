@@ -128,10 +128,8 @@ func TestPackDirectoryValidatesLooseSourceFirst(t *testing.T) {
 	// Group-writable loose content is refused by the public loose reader but
 	// would be invisible after archiving under default modes.
 	mustWrite(t, source, "notes/shared.txt", []byte("shared"), 0o644)
-	if err := os.Chmod(filepath.Join(source, "notes", "shared.txt"), 0o664); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, err := packDirectory(context.Background(), source); err == nil || !strings.Contains(err.Error(), "unsafe file mode") {
+	makeSharedWritable(t, filepath.Join(source, "notes", "shared.txt"))
+	if _, _, _, err := packDirectory(context.Background(), source); err == nil || !strings.Contains(err.Error(), sharedWritableRefusal) {
 		t.Fatalf("group-writable loose source error = %v", err)
 	}
 }
@@ -174,7 +172,7 @@ func TestPublishedArchiveKeepsIdentityWhileRepackageUsesDefaults(t *testing.T) {
 
 func minimalSuiteCopy(t *testing.T) string {
 	t.Helper()
-	source := filepath.Join(t.TempDir(), "suite")
+	source := privateFixtureDir(t, filepath.Join(t.TempDir(), "suite"))
 	copyDirectory(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), source)
 	return source
 }

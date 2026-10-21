@@ -36,7 +36,7 @@ func TestSuiteJudgeSelectionBeforeConfiguration(t *testing.T) {
 		{"invalid credential selection", []string{"--judge-base-url", "https://judge.example.invalid", "--judge-key-env", "bad-name"}, "valid environment variable name", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			root, outfile := suiteEvalSource(t)
 			suiteJudgeCase(t, root)
 			var out, diagnostics bytes.Buffer
@@ -73,7 +73,7 @@ func TestSuiteJudgeEndpointNeverInGuardRecovery(t *testing.T) {
 	const endpoint = "https://judge.example.invalid/PRIVATE_ENDPOINT_CANARY"
 	for i, flags := range [][]string{{"--judge-base-url", endpoint}, {"--judge-base-url=" + endpoint}} {
 		t.Run([]string{"split", "equals"}[i], func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			root, outfile := suiteEvalSource(t)
 			suiteJudgeCase(t, root)
 			var out, diagnostics bytes.Buffer

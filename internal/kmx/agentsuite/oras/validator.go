@@ -7,9 +7,9 @@ import (
 
 	agentsuite "github.com/agent-primitives/suite"
 	kmxsuite "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	oraslib "oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content/oci"
 )
 
 // LayoutValidator validates an AgentSuite artifact from content-addressed
@@ -36,12 +36,12 @@ func validateLayout(ctx context.Context, src kmxsuite.ReadOnlyStorage, root ocis
 	if src == nil {
 		return nil, fmt.Errorf("AgentSuite validation source is required")
 	}
-	stageRoot, err := os.MkdirTemp("", "agentsuite-validation-*")
+	stageRoot, err := fileaccess.PrivateTempDir("", "agentsuite-validation-*")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(stageRoot)
-	stage, err := oci.New(stageRoot)
+	stage, err := newPrivateStore(stageRoot)
 	if err != nil {
 		return nil, fmt.Errorf("create AgentSuite validation layout: %w", err)
 	}
@@ -50,6 +50,9 @@ func validateLayout(ctx context.Context, src kmxsuite.ReadOnlyStorage, root ocis
 	}
 	if err := stage.Tag(ctx, root, "validation"); err != nil {
 		return nil, fmt.Errorf("index AgentSuite validation root: %w", err)
+	}
+	if err := verifyPrivateTree(stageRoot); err != nil {
+		return nil, fmt.Errorf("check AgentSuite validation layout: %w", err)
 	}
 	if flowMode {
 		graph, err := agentsuite.ValidatePathFlowV1Alpha1(stageRoot)

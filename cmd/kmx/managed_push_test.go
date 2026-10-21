@@ -18,7 +18,7 @@ import (
 func TestWorkspaceBarePushReadsSavedRepositoryAndTransportOnce(t *testing.T) {
 	for _, mode := range []string{"saved", "explicit false", "missing proof"} {
 		t.Run(mode, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			t.Setenv("DOCKER_CONFIG", t.TempDir())
 			root, _ := suiteEvalSource(t)
 			prepared, err := workspace.Prepare(t.Context(), root, filepath.Join(t.TempDir(), "cache"))
@@ -77,7 +77,7 @@ func TestWorkspaceBarePushReadsSavedRepositoryAndTransportOnce(t *testing.T) {
 func TestWorkspacePushEvaluatedDefaultAndBareValidation(t *testing.T) {
 	for _, mode := range []string{"default", "false opt-out", "unevaluated", "conflict", "empty evaluation", "bare missing repository", "bare layout"} {
 		t.Run(mode, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			root, _ := suiteEvalSource(t)
 			layout := filepath.Join(t.TempDir(), "layout")
 			args := []string{"push", "--workspace", root, "--to-layout", layout, "agents:slide-v1"}

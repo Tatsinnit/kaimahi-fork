@@ -13,7 +13,7 @@ import (
 
 // Review must not turn validation into execution or change authored files.
 func TestSuiteWorkspaceReviewReadOnlyCompleteAndDrift(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	opt := nativeEvaluationOptions(t)
 	before := map[string][]byte{}
 	err := filepath.WalkDir(opt.Workspace, func(path string, entry os.DirEntry, err error) error {
@@ -93,7 +93,7 @@ func TestSuiteWorkspaceReviewRefusesBeforeExecution(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateSuiteDir(t))
 			opt := nativeEvaluationOptions(t)
 			tc.change(t, opt.Workspace)
 			root := opt.Workspace
@@ -129,7 +129,7 @@ func TestSuiteWorkspaceReviewRefusesBeforeExecution(t *testing.T) {
 }
 
 func TestSuiteWorkspaceReviewKeepsAllAssertionDefinitions(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	opt := nativeEvaluationOptions(t)
 	writeFile(t, filepath.Join(opt.Workspace, "eval/second.yaml"), "id: second\ninput: public content\nassertions:\n- {id: positive, type: contains, value: yes}\n- {id: negative, type: notContains, value: secret}\n- {id: format, type: regex, pattern: '^yes$'}\n")
 	r, err := (&App{}).reviewSuiteWorkspace(t.Context(), opt.Workspace)

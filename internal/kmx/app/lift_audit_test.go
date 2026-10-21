@@ -21,7 +21,7 @@ import (
 func liftAuditApp(t *testing.T) (*App, *bytes.Buffer, string) {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	t.Setenv("KMX_TOOLCHAIN", "off")
 	t.Setenv("LIFT_CALLS", filepath.Join(dir, "calls"))
 	t.Setenv("LIFT_GONE", filepath.Join(dir, "gone"))

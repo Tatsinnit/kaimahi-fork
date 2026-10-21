@@ -62,7 +62,7 @@ func profileCommandSource(t *testing.T) (string, *workspace.Prepared) {
 }
 
 func TestProfiledCLITransferAndOfflineRefusals(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	root, p := profileCommandSource(t)
 	t.Setenv("PATH", t.TempDir())
 	var out, diag bytes.Buffer

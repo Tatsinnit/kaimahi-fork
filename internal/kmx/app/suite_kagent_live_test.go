@@ -27,7 +27,7 @@ func TestLiveSuiteKagentPlacement(t *testing.T) {
 	if os.Getenv("KMX_LIVE_KIND_CONTEXT") != "kind-kmx-kagent-lift" {
 		t.Fatal("suite helper qualification requires its dedicated kind context")
 	}
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	var output bytes.Buffer
 	runner := run.Default()
 	runner.Stdout, runner.Stderr, runner.Echo = &output, &output, false

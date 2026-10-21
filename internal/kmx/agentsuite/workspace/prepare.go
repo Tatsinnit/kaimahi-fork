@@ -12,6 +12,7 @@ import (
 
 	agentsuite "github.com/agent-primitives/suite"
 	suiteoras "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/oras"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2/content"
 )
@@ -73,37 +74,11 @@ func within(parent, child string) bool {
 	rel, err := filepath.Rel(parent, child)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
-func privateTree(root string, setMode bool) error {
-	return filepath.WalkDir(root, func(name string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.Type()&os.ModeSymlink != 0 {
-			return errors.New("cache symlinks are not supported")
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() && !info.Mode().IsRegular() {
-			return errors.New("cache contains nonregular file")
-		}
-		if d.IsDir() {
-			if setMode {
-				return os.Chmod(name, 0o700)
-			}
-			if info.Mode().Perm() != 0o700 {
-				return errors.New("cache directories must be private (0700)")
-			}
-		}
-		return nil
-	})
-}
 func cached(ctx context.Context, key string, s *snapshot, flowMode bool) (*Prepared, error) {
 	if err := privateTree(key, false); err != nil {
 		return nil, err
 	}
-	r, err := os.OpenRoot(key)
+	r, err := openPrivateRoot(key)
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +118,9 @@ func prepare(ctx context.Context, root, cacheDir string, flowMode bool) (*Prepar
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := fileaccess.RefuseWindowsDriveMount(cacheDir); err != nil {
+		return nil, err
+	}
 	root, err := safeAbsolute(root)
 	if err != nil {
 		return nil, err
@@ -151,22 +129,15 @@ func prepare(ctx context.Context, root, cacheDir string, flowMode bool) (*Prepar
 	if err != nil {
 		return nil, err
 	}
-	if within(root, cacheDir) || within(cacheDir, root) {
-		return nil, errors.New("prepared cache must be outside and not contain the workspace")
+	if overlap, err := cacheOverlaps(root, cacheDir); err != nil || overlap {
+		return nil, errors.Join(errors.New("prepared cache must be outside and not contain the workspace"), err)
 	}
 	s, err := loadSourceMode(ctx, root, flowMode)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+	if err := ensurePrivateCache(cacheDir); err != nil {
 		return nil, err
-	}
-	info, err := os.Stat(cacheDir)
-	if err != nil {
-		return nil, err
-	}
-	if info.Mode().Perm() != 0o700 {
-		return nil, errors.New("prepared cache must be private (0700)")
 	}
 	key := filepath.Join(cacheDir, strings.TrimPrefix(s.fingerprint, "sha256:"))
 	if _, err := os.Lstat(key); err == nil {
@@ -181,7 +152,7 @@ func prepare(ctx context.Context, root, cacheDir string, flowMode bool) (*Prepar
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
-	stage, err := os.MkdirTemp(cacheDir, ".prepare-*")
+	stage, err := fileaccess.PrivateTempDir(cacheDir, ".prepare-*")
 	if err != nil {
 		return nil, err
 	}
@@ -212,13 +183,13 @@ func prepare(ctx context.Context, root, cacheDir string, flowMode bool) (*Prepar
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(stage, "prepared.json"), record, 0o600); err != nil {
+	if err := fileaccess.WritePrivateFile(filepath.Join(stage, "prepared.json"), record, 0o600); err != nil {
 		return nil, err
 	}
 	if err := checkCurrent(ctx, root, p, flowMode); err != nil {
 		return nil, err
 	}
-	if err := os.Rename(stage, key); err != nil {
+	if err := publishCacheEntry(stage, key); err != nil {
 		if _, statErr := os.Lstat(key); statErr != nil {
 			return nil, err
 		}
@@ -285,7 +256,7 @@ func verify(ctx context.Context, p *Prepared) (map[string][]byte, error) {
 	if _, err := agentsuite.ValidatePath(root); err != nil {
 		return nil, err
 	}
-	r, err := os.OpenRoot(root)
+	r, err := openPrivateRoot(root)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +272,7 @@ func verify(ctx context.Context, p *Prepared) (map[string][]byte, error) {
 	if len(index.Manifests) != 1 || !content.Equal(index.Manifests[0], p.Descriptor) || index.Manifests[0].ArtifactType != p.Descriptor.ArtifactType {
 		return nil, errors.New("prepared descriptor does not match layout root")
 	}
-	stage, err := os.MkdirTemp("", "kmx-native-verify-*")
+	stage, err := fileaccess.PrivateTempDir("", "kmx-native-verify-*")
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +281,7 @@ func verify(ctx context.Context, p *Prepared) (map[string][]byte, error) {
 	if _, err := suiteoras.Pull(ctx, root, p.Descriptor.Digest.String(), out); err != nil {
 		return nil, err
 	}
-	extracted, err := os.OpenRoot(out)
+	extracted, err := openPrivateRoot(out)
 	if err != nil {
 		return nil, err
 	}

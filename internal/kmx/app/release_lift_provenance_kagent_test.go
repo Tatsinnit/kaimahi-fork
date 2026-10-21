@@ -8,7 +8,7 @@ import (
 
 func TestReleaseLiftKagentProvenance(t *testing.T) {
 	a, opt, _, _ := releaseKagentFixture(t)
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	p, err := a.PrepareReleaseLift(t.Context(), opt)
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func TestReleaseLiftKagentProvenance(t *testing.T) {
 
 func TestReleaseLiftProvenanceUsesActualGate(t *testing.T) {
 	a, _, opt, dir := releaseApplyFixture(t, "both")
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	opt.Promote = true
 	p, err := a.PrepareReleaseLift(t.Context(), opt)
 	if err != nil {

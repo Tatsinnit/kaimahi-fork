@@ -48,7 +48,7 @@ func (a *App) ExportSuiteEvaluation(ctx context.Context, opt SuiteEvaluationExpo
 	}
 	state, e := config.StateDir()
 	if e != nil {
-		return errSuitePublicProof
+		return filesystemBoundaryError(errSuitePublicProof, e)
 	}
 	cache := filepath.Join(state, "suites")
 	if suiteReceiptInside(opt.Out, filepath.Join(state, "passing")) {
@@ -103,7 +103,7 @@ func (a *App) ExportSuiteEvaluation(ctx context.Context, opt SuiteEvaluationExpo
 	// The publisher is not even opened until complete shared verification succeeds.
 	output, e := preflightSuitePublicExport(ctx, opt.Out, root, cache)
 	if e != nil {
-		return errSuitePublicOutput
+		return filesystemBoundaryError(errSuitePublicOutput, e)
 	}
 	defer func() {
 		if output.Close() != nil {

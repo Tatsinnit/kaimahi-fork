@@ -16,6 +16,7 @@ import (
 	suiteoras "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/oras"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/workspace"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/config"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/guard"
 	agentruntime "github.com/kaimahi-agents/kaimahi/internal/kmx/runtime"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/scaffold"
@@ -406,7 +407,7 @@ func (a *App) LiftWorkspace(ctx context.Context, p *PreparedWorkspaceLift) (r Wo
 			return r, errWorkspaceLiftState
 		}
 		if p.options.Provenance.Require {
-			temporary, e := os.MkdirTemp("", "kmx-lift-provenance-*")
+			temporary, e := fileaccess.PrivateTempDir("", "kmx-lift-provenance-*")
 			if e != nil {
 				return r, e
 			}

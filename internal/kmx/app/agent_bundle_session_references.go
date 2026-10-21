@@ -8,12 +8,11 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentsessions"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	agentruntime "github.com/kaimahi-agents/kaimahi/internal/kmx/runtime"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/secretshapes"
 )
@@ -79,6 +78,10 @@ func (a *App) ExtractAgentSessionReferences(opt SessionReferenceExtractionOption
 	address, err := agentsessions.NormalizeAddress(opt.Sessions)
 	if err != nil {
 		return errors.New("invalid session reference source address")
+	}
+	// Refuse an unsupported output location before any source is dialed.
+	if err := fileaccess.RefuseWindowsDriveMount(opt.Out); err != nil {
+		return err
 	}
 	root, name, _, err := openSessionReferenceDirectory(opt.Out)
 	if err != nil {
@@ -171,63 +174,10 @@ func safeSessionReferenceUID(uid string) bool {
 	return true
 }
 
-// openSessionReferenceDirectory walks from the volume root one component at a
-// time. Each handle is anchored before descending; symlinks are never accepted,
-// even if they point inside the same tree. Sticky shared ancestors such as /tmp
-// are allowed, but the immediate parent must not be group/other-writable.
-func openSessionReferenceDirectory(path string) (*os.Root, string, os.FileInfo, error) {
-	if path == "" || strings.IndexByte(path, 0) >= 0 {
-		return nil, "", nil, errSessionReferenceDirectory
-	}
-	absolute, err := filepath.Abs(path)
-	if err != nil || filepath.Base(absolute) == "." || filepath.Base(absolute) == string(filepath.Separator) {
-		return nil, "", nil, errSessionReferenceDirectory
-	}
-	parent := filepath.Dir(absolute)
-	volume := filepath.VolumeName(parent) + string(filepath.Separator)
-	root, err := os.OpenRoot(volume)
-	if err != nil {
-		return nil, "", nil, errSessionReferenceDirectory
-	}
-	parts := strings.Split(strings.TrimPrefix(parent, volume), string(filepath.Separator))
-	for _, part := range parts {
-		if part == "" {
-			continue
-		}
-		info, err := root.Lstat(part)
-		if err != nil || !safeSessionReferenceDirectory(info, false) {
-			root.Close()
-			return nil, "", nil, errSessionReferenceDirectory
-		}
-		next, err := root.OpenRoot(part)
-		if err != nil {
-			root.Close()
-			return nil, "", nil, errSessionReferenceDirectory
-		}
-		opened, err := next.Stat(".")
-		current, currentErr := root.Lstat(part)
-		root.Close()
-		if err != nil || currentErr != nil || !safeSessionReferenceDirectory(current, false) || !os.SameFile(info, opened) || !os.SameFile(info, current) {
-			next.Close()
-			return nil, "", nil, errSessionReferenceDirectory
-		}
-		root = next
-	}
-	info, err := root.Stat(".")
-	if err != nil || !safeSessionReferenceDirectory(info, true) {
-		root.Close()
-		return nil, "", nil, errSessionReferenceDirectory
-	}
-	return root, filepath.Base(absolute), info, nil
-}
-
-func safeSessionReferenceDirectory(info os.FileInfo, immediate bool) bool {
-	return info != nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 &&
-		(info.Mode().Perm()&0022 == 0 || !immediate && info.Mode()&os.ModeSticky != 0)
-}
-
-func safeSessionReferenceFile(info os.FileInfo) bool {
-	return info != nil && info.Mode().IsRegular() && info.Mode().Perm()&0077 == 0 && info.Size() <= maxSessionReferenceManifestBytes
+// safeSessionReferenceEntry is the existing private lock-file rule: a
+// bounded regular file that passes the platform privacy check.
+func safeSessionReferenceEntry(root *os.Root, name string, info os.FileInfo) bool {
+	return info != nil && info.Mode().IsRegular() && info.Size() <= maxSessionReferenceManifestBytes && privateEntryOK(root, name, info)
 }
 
 func readSessionReferenceFile(root *os.Root, name string) ([]byte, os.FileInfo, error) {
@@ -236,24 +186,24 @@ func readSessionReferenceFile(root *os.Root, name string) ([]byte, os.FileInfo, 
 
 func readSessionReferenceFileMode(root *os.Root, name string, private bool) ([]byte, os.FileInfo, error) {
 	safe := func(info os.FileInfo) bool {
-		return info != nil && info.Mode().IsRegular() && info.Size() <= maxSessionReferenceManifestBytes && (!private || info.Mode().Perm()&0077 == 0)
+		return info != nil && info.Mode().IsRegular() && info.Size() <= maxSessionReferenceManifestBytes
 	}
 	info, err := root.Lstat(name)
-	if err != nil || !safe(info) {
+	if err != nil || !safe(info) || private && !privateEntryOK(root, name, info) {
 		return nil, nil, errSessionReferenceFile
 	}
-	file, err := root.Open(name)
+	file, err := openRootEntry(root, name)
 	if err != nil {
 		return nil, nil, errSessionReferenceFile
 	}
 	defer file.Close()
 	opened, err := file.Stat()
-	if err != nil || !safe(opened) || !os.SameFile(info, opened) {
+	if err != nil || !safe(opened) || private && !privateFileOK(file, opened) || !os.SameFile(info, opened) {
 		return nil, nil, errSessionReferenceFile
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, maxSessionReferenceManifestBytes+1))
 	current, currentErr := root.Lstat(name)
-	if err != nil || len(raw) > maxSessionReferenceManifestBytes || currentErr != nil || !safe(current) || !os.SameFile(opened, current) {
+	if err != nil || len(raw) > maxSessionReferenceManifestBytes || currentErr != nil || !safe(current) || private && !privateEntryOK(root, name, current) || !os.SameFile(opened, current) {
 		return nil, nil, errSessionReferenceFile
 	}
 	return raw, opened, nil
@@ -304,6 +254,11 @@ func appendSessionReferenceManifestContext(ctx context.Context, path string, add
 	if _, err := agentruntime.MarshalSessionReferenceManifest(agentruntime.SessionReferenceManifest{SchemaVersion: 1, Policy: agentruntime.SessionReferencePolicy, Cases: additions}); err != nil {
 		return errSessionReferenceManifest
 	}
+	// The output directory is caller-selected, so it gets its own guard
+	// before the lock or stage is created.
+	if err := fileaccess.RefuseWindowsDriveMount(path); err != nil {
+		return err
+	}
 	root, name, parent, err := openSessionReferenceDirectory(path)
 	if err != nil {
 		return err
@@ -331,7 +286,7 @@ func appendSessionReferenceManifestContext(ctx context.Context, path string, add
 		return errSessionReferenceAppend
 	}
 	stage := ".session-reference-" + token
-	file, err := root.OpenFile(stage, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	file, err := createPrivateFile(root, stage, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
 	if err != nil {
 		return errSessionReferenceAppend
 	}
@@ -385,7 +340,7 @@ func lockSessionReferenceManifest(ctx context.Context, root *os.Root, name strin
 		if ctx.Err() != nil {
 			return nil, errSessionReferenceAppend
 		}
-		file, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		file, err := createPrivateFile(root, name, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
 		if err == nil {
 			info, statErr := file.Stat()
 			closeErr := file.Close()
@@ -394,7 +349,7 @@ func lockSessionReferenceManifest(ctx context.Context, root *os.Root, name strin
 				return nil, errSessionReferenceAppend
 			}
 			return func() {
-				if current, err := root.Lstat(name); err == nil && os.SameFile(info, current) && safeSessionReferenceFile(current) {
+				if current, err := root.Lstat(name); err == nil && os.SameFile(info, current) && safeSessionReferenceEntry(root, name, current) {
 					_ = root.Remove(name)
 				}
 			}, nil
@@ -406,7 +361,7 @@ func lockSessionReferenceManifest(ctx context.Context, root *os.Root, name strin
 		if os.IsNotExist(err) {
 			continue
 		}
-		if err != nil || !safeSessionReferenceFile(info) {
+		if err != nil || !safeSessionReferenceEntry(root, name, info) {
 			return nil, errSessionReferenceAppend
 		}
 		timer := time.NewTimer(10 * time.Millisecond)

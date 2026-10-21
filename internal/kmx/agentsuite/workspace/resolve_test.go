@@ -68,6 +68,9 @@ func TestResolveWorkspace(t *testing.T) {
 				setupErr = os.Mkdir(marker, 0700)
 			case "symlink":
 				setupErr = os.Symlink(filepath.Join(selected, "workspace.yaml"), marker)
+				if setupErr != nil {
+					symlinkUnavailable(t, setupErr)
+				}
 			case "FIFO":
 				tool, err := exec.LookPath("mkfifo")
 				if err != nil {

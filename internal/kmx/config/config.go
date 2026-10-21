@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 )
 
 // Product defaults and namespace hints.
@@ -171,19 +173,35 @@ func (c *Config) KindUnset() []string {
 }
 
 // StateDir is where kmx keeps its local state and the binaries kmx had to
-// fetch. Without an override it follows os.UserConfigDir: the XDG config home
-// on Linux and Library/Application Support on macOS. KMX_HOME is the explicit
-// cross-platform override for tests and isolated invocations; app packages
-// should use this function rather than interpreting OS-specific variables.
+// fetch. Without an override it follows the platform's native location: the
+// XDG config home on Linux and Library/Application Support on macOS (both via
+// os.UserConfigDir), and %LOCALAPPDATA%\kmx on Windows. KMX_HOME is the
+// explicit cross-platform override for tests and isolated invocations; app
+// packages should use this function rather than interpreting OS-specific
+// variables.
+//
+// Every returned directory, override included, has passed the Linux
+// Windows-drive guard and, on Windows only, the create-or-check of a
+// protected current-user-only root. Derived directories inherit both.
 func StateDir() (string, error) {
+	dir, err := stateDirPath()
+	if err != nil {
+		return "", err
+	}
+	if err := fileaccess.RefuseWindowsDriveMount(dir); err != nil {
+		return "", err
+	}
+	if err := prepareStateDirectory(dir); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func stateDirPath() (string, error) {
 	if home := strings.TrimSpace(os.Getenv("KMX_HOME")); home != "" {
 		return home, nil
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("cannot locate a config directory (set KMX_HOME): %w", err)
-	}
-	return filepath.Join(dir, "kmx"), nil
+	return nativeStateDirectory()
 }
 
 func contextFile() (string, error) {
@@ -244,7 +262,7 @@ func ReadSelectedContext() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	b, err := os.ReadFile(path)
+	b, err := readSelectedContextFile(path)
 	if os.IsNotExist(err) {
 		return "", nil
 	}
@@ -260,10 +278,7 @@ func WriteSelectedContext(context string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(path, []byte(context+"\n"), 0o600); err != nil {
+	if err := writeSelectedContextFile(path, []byte(context+"\n")); err != nil {
 		return "", err
 	}
 	return path, nil

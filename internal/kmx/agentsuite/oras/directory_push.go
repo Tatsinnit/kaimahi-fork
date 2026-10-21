@@ -16,6 +16,7 @@ import (
 
 	agentsuite "github.com/agent-primitives/suite"
 	kmxsuite "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	godigest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2/content/oci"
@@ -55,6 +56,9 @@ func pushDirectoryLayout(ctx context.Context, source, destination, reference str
 	if reference == "" {
 		return PushResult{}, errors.New("AgentSuite push reference is required")
 	}
+	if err := fileaccess.RefuseWindowsDriveMount(destination); err != nil {
+		return PushResult{}, err
+	}
 	sourcePath, err := filepath.Abs(source)
 	if err != nil {
 		return PushResult{}, err
@@ -83,6 +87,9 @@ func pushDirectoryLayout(ctx context.Context, source, destination, reference str
 	if pathWithin(canonicalSource, canonicalDestination) {
 		return PushResult{}, errors.New("AgentSuite target must be outside the source directory")
 	}
+	if within, err := physicalWithin(sourcePath, destinationPath); err != nil || within {
+		return PushResult{}, errors.Join(errors.New("AgentSuite target must be outside the source directory"), err)
+	}
 
 	packedRoot, packedStore, packed, err := packDirectoryMode(ctx, sourcePath, flowMode)
 	if err != nil {
@@ -100,7 +107,7 @@ func pushDirectoryLayout(ctx context.Context, source, destination, reference str
 	updatedTarget := false
 	targetInfo, err := os.Lstat(destinationPath)
 	if os.IsNotExist(err) {
-		targetPath, err = os.MkdirTemp(destinationParent, "."+filepath.Base(destinationPath)+"-*")
+		targetPath, err = fileaccess.PrivateTempDir(destinationParent, "."+filepath.Base(destinationPath)+"-*")
 		if err != nil {
 			return PushResult{}, fmt.Errorf("create staged AgentSuite target: %w", err)
 		}
@@ -116,18 +123,23 @@ func pushDirectoryLayout(ctx context.Context, source, destination, reference str
 		return PushResult{}, fmt.Errorf("AgentSuite target %s is not a directory", destinationPath)
 	} else if err := requireOCILayout(destinationPath, "AgentSuite target"); err != nil {
 		return PushResult{}, err
+	} else if err := checkExistingLayout(destinationPath); err != nil {
+		return PushResult{}, fmt.Errorf("check AgentSuite OCI target: %w", err)
 	} else {
 		updatedTarget = true
 	}
-	target, err := oci.New(targetPath)
+	target, err := newPrivateStore(targetPath)
 	if err != nil {
 		return PushResult{}, fmt.Errorf("open AgentSuite OCI target: %w", err)
 	}
 	if _, err := NewPusher(target).Push(ctx, packedStore, packed.Descriptor, reference); err != nil {
 		return PushResult{}, err
 	}
+	if err := verifyPrivateTree(targetPath); err != nil {
+		return PushResult{}, fmt.Errorf("check AgentSuite OCI target: %w", err)
+	}
 	if publishTarget {
-		if err := os.Rename(targetPath, destinationPath); err != nil {
+		if err := publishDirectory(targetPath, destinationPath); err != nil {
 			return PushResult{}, fmt.Errorf("publish AgentSuite OCI target: %w", err)
 		}
 		publishTarget = false
@@ -149,7 +161,7 @@ func packDirectory(
 }
 
 func packDirectoryMode(ctx context.Context, source string, flowMode bool) (string, *oci.Store, kmxsuite.PackResult, error) {
-	sourceRoot, err := os.MkdirTemp("", "agentsuite-source-cas-*")
+	sourceRoot, err := fileaccess.PrivateTempDir("", "agentsuite-source-cas-*")
 	if err != nil {
 		return "", nil, kmxsuite.PackResult{}, err
 	}
@@ -165,7 +177,7 @@ func packDirectoryMode(ctx context.Context, source string, flowMode bool) (strin
 	if err != nil {
 		return "", nil, kmxsuite.PackResult{}, fmt.Errorf("validate AgentSuite directory: %w", err)
 	}
-	sourceStore, err := oci.New(sourceRoot)
+	sourceStore, err := newPrivateStore(sourceRoot)
 	if err != nil {
 		return "", nil, kmxsuite.PackResult{}, fmt.Errorf("create AgentSuite source CAS: %w", err)
 	}
@@ -173,12 +185,15 @@ func packDirectoryMode(ctx context.Context, source string, flowMode bool) (strin
 	if err != nil {
 		return "", nil, kmxsuite.PackResult{}, fmt.Errorf("archive AgentSuite directory: %w", err)
 	}
+	if err := verifyPrivateTree(sourceRoot); err != nil {
+		return "", nil, kmxsuite.PackResult{}, fmt.Errorf("check AgentSuite source CAS: %w", err)
+	}
 
-	packedRoot, err := os.MkdirTemp("", "agentsuite-packed-*")
+	packedRoot, err := fileaccess.PrivateTempDir("", "agentsuite-packed-*")
 	if err != nil {
 		return "", nil, kmxsuite.PackResult{}, fmt.Errorf("create staged AgentSuite artifact: %w", err)
 	}
-	packedStore, err := oci.New(packedRoot)
+	packedStore, err := newPrivateStore(packedRoot)
 	if err != nil {
 		_ = os.RemoveAll(packedRoot)
 		return "", nil, kmxsuite.PackResult{}, fmt.Errorf("create staged AgentSuite artifact: %w", err)
@@ -191,6 +206,10 @@ func packDirectoryMode(ctx context.Context, source string, flowMode bool) (strin
 	if err != nil {
 		_ = os.RemoveAll(packedRoot)
 		return "", nil, kmxsuite.PackResult{}, err
+	}
+	if err := verifyPrivateTree(packedRoot); err != nil {
+		_ = os.RemoveAll(packedRoot)
+		return "", nil, kmxsuite.PackResult{}, fmt.Errorf("check staged AgentSuite artifact: %w", err)
 	}
 	return packedRoot, packedStore, packed, nil
 }
@@ -266,12 +285,12 @@ func pushDirectory(
 	}
 	slices.Sort(names)
 
-	archive, err := os.CreateTemp("", "agentsuite-content-*.tar.gz")
+	archive, removeArchive, err := createArchiveTemp()
 	if err != nil {
 		return ocispec.Descriptor{}, err
 	}
 	archivePath := archive.Name()
-	defer os.Remove(archivePath)
+	defer removeArchive()
 	if err := writeArchive(ctx, rootHandle, names, modes, archive); err != nil {
 		archive.Close()
 		return ocispec.Descriptor{}, err

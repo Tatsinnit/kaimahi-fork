@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -42,7 +43,7 @@ func (r *Runner) cmd(name string, args ...string) *exec.Cmd {
 		c = exec.CommandContext(r.Context, name, args...)
 	}
 	if len(r.Env) > 0 || len(r.Unset) > 0 {
-		c.Env = environ(os.Environ(), r.Env, r.Unset)
+		c.Env = environ(os.Environ(), r.Env, r.Unset, runtime.GOOS == "windows")
 	}
 	return c
 }
@@ -50,13 +51,13 @@ func (r *Runner) cmd(name string, args ...string) *exec.Cmd {
 // environ applies additions and removals to a base environment. Removals are
 // applied to the base only: a variable both set and unset is set, since the
 // caller naming a value said so more specifically.
-func environ(base, add, unset []string) []string {
+func environ(base, add, unset []string, caseInsensitive bool) []string {
 	out := make([]string, 0, len(base)+len(add))
 	for _, entry := range base {
 		name, _, _ := strings.Cut(entry, "=")
 		drop := false
 		for _, u := range unset {
-			if name == u {
+			if name == u || caseInsensitive && strings.EqualFold(name, u) {
 				drop = true
 				break
 			}

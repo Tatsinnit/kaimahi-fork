@@ -12,11 +12,11 @@ import (
 
 	agentsuite "github.com/agent-primitives/suite"
 	kmxsuite "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	godigest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	oraslib "oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
-	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/errdef"
 )
 
@@ -57,12 +57,12 @@ func (p *Packer) Pack(
 		return kmxsuite.PackResult{}, fmt.Errorf("validate AgentSuite content descriptor: %w", err)
 	}
 
-	stageRoot, err := os.MkdirTemp("", "agentsuite-layout-*")
+	stageRoot, err := fileaccess.PrivateTempDir("", "agentsuite-layout-*")
 	if err != nil {
 		return kmxsuite.PackResult{}, err
 	}
 	defer os.RemoveAll(stageRoot)
-	stage, err := oci.New(stageRoot)
+	stage, err := newPrivateStore(stageRoot)
 	if err != nil {
 		return kmxsuite.PackResult{}, fmt.Errorf("create staged AgentSuite OCI layout: %w", err)
 	}
@@ -92,6 +92,9 @@ func (p *Packer) Pack(
 		return kmxsuite.PackResult{}, fmt.Errorf("stage AgentSuite manifest: %w", err)
 	}
 
+	if err := verifyPrivateTree(stageRoot); err != nil {
+		return kmxsuite.PackResult{}, fmt.Errorf("check staged AgentSuite OCI layout: %w", err)
+	}
 	report, err := p.validator.Validate(ctx, stage, manifestDescriptor)
 	if err != nil {
 		return kmxsuite.PackResult{}, fmt.Errorf("validate packed AgentSuite: %w", err)

@@ -180,19 +180,39 @@ jobs:
         run: goreleaser release --clean --skip=publish,validate
 
       # Platforms, and why exactly these: kmx drives a Linux container
-      # runtime (kind), so the machine running it is a Linux host or a Mac
-      # running one in a VM — amd64 and arm64 cover both, and are the same
-      # four platforms the pinned cluster tools publish, which kmx downloads
-      # for the SAME machine. Windows is served through WSL, which is
-      # linux/amd64; a native windows/amd64 build would be an untested
-      # claim, not a platform. .goreleaser.yaml's `builds` pins this set.
-      - name: The four release binaries exist
+      # runtime (kind), so Unix machines are a Linux host or a Mac running one
+      # in a VM — amd64 and arm64 cover both, and are the same four platforms
+      # the pinned cluster tools publish, which kmx downloads for the SAME
+      # machine. Native Windows amd64/arm64 add kmx.exe builds; every release
+      # published before them carries only the four Unix binaries.
+      # .goreleaser.yaml's `builds` pins this set of six.
+      - name: The six release binaries exist
         run: |
           set -euo pipefail
-          for target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
-            matches=(dist/kmx_"$target"*/kmx)
+          for target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64 windows_amd64 windows_arm64; do
+            binary=kmx
+            case "$target" in windows_*) binary=kmx.exe ;; esac
+            matches=(dist/kmx_"$target"*/"$binary")
             test "${#matches[@]}" -eq 1
             test -f "${matches[0]}"
+          done
+
+      # The Windows binaries cannot run on this runner, so check their own
+      # build metadata: the target they claim, this commit, a clean tree.
+      - name: The Windows binaries carry their target and provenance
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            matches=(dist/kmx_windows_"$arch"*/kmx.exe)
+            test "${#matches[@]}" -eq 1
+            go version -m "${matches[0]}" | tee "$RUNNER_TEMP/buildinfo-windows-$arch.txt"
+            grep -qE "^[[:space:]]+build[[:space:]]+GOOS=windows$" "$RUNNER_TEMP/buildinfo-windows-$arch.txt"
+            grep -qE "^[[:space:]]+build[[:space:]]+GOARCH=$arch$" "$RUNNER_TEMP/buildinfo-windows-$arch.txt"
+            grep -q "vcs.revision=$GITHUB_SHA" "$RUNNER_TEMP/buildinfo-windows-$arch.txt"
+            if grep -q 'vcs.modified=true' "$RUNNER_TEMP/buildinfo-windows-$arch.txt"; then
+              echo "kmx-windows-$arch.exe is stamped as built from a modified tree" >&2
+              exit 1
+            fi
           done
 
       # The binary must say what it is. That is what version stamping is
@@ -215,9 +235,9 @@ jobs:
           fi
 
       # dist/checksums.txt names assets the way they will be uploaded
-      # (kmx-$os-$arch, no directory component) — .goreleaser.yaml's
-      # `archives.name_template` sets that, matching what install.sh and
-      # docs/releases.md's "by hand" section already expect.
+      # (kmx-$os-$arch, plus .exe for Windows, no directory component) —
+      # .goreleaser.yaml's `archives.name_template` sets that, matching what
+      # install.sh and docs/releases.md's "by hand" section already expect.
       - name: Checksums match the built binaries
         env:
           VERSION: ${{ steps.what.outputs.version }}
@@ -225,12 +245,15 @@ jobs:
           set -euo pipefail
           cat dist/checksums.txt
           # The renderer's parser enforces exactly one entry for each of the
-          # four expected assets, with no unknown names. Without this, the
+          # six expected assets, with no unknown names. Without this, the
           # loop below would vacuously accept an empty or incomplete manifest.
-          python3 scripts/homebrew-formula.py "$VERSION" dist/checksums.txt >/dev/null
+          # (Without --require-windows it also accepts the four-asset
+          # manifests of releases published before Windows assets existed.)
+          python3 scripts/homebrew-formula.py "$VERSION" dist/checksums.txt --require-windows >/dev/null
           while read -r want name; do
-            suffix=$(printf '%s' "${name#kmx-}" | tr - _)
-            matches=(dist/kmx_"$suffix"*/kmx)
+            stem=${name%.exe}
+            suffix=$(printf '%s' "${stem#kmx-}" | tr - _)
+            matches=(dist/kmx_"$suffix"*/kmx"${name#"$stem"}")
             test "${#matches[@]}" -eq 1
             test -f "${matches[0]}"
             got=$(sha256sum "${matches[0]}" | cut -d' ' -f1)
@@ -258,6 +281,11 @@ jobs:
           fi
           ruby -c dist/homebrew/Formula/kmx.rb
           test -s dist/homebrew/Formula/kmx.rb
+          # Homebrew installs only the four Unix binaries.
+          if grep -qi windows dist/homebrew/Formula/kmx.rb; then
+            echo "the Homebrew formula must not name a Windows asset" >&2
+            exit 1
+          fi
 
       # Exercise the emitted test block, not a duplicate version assertion.
       # This is a binary smoke test, not a replacement for tap-side brew test.
@@ -300,9 +328,10 @@ jobs:
           artifact_dir="$RUNNER_TEMP/release-assets"
           rm -rf "$artifact_dir"
           mkdir -p "$artifact_dir"
-          for name in kmx-linux-amd64 kmx-linux-arm64 kmx-darwin-amd64 kmx-darwin-arm64; do
-            suffix=$(printf '%s' "${name#kmx-}" | tr - _)
-            matches=(dist/kmx_"$suffix"*/kmx)
+          for name in kmx-linux-amd64 kmx-linux-arm64 kmx-darwin-amd64 kmx-darwin-arm64 kmx-windows-amd64.exe kmx-windows-arm64.exe; do
+            stem=${name%.exe}
+            suffix=$(printf '%s' "${stem#kmx-}" | tr - _)
+            matches=(dist/kmx_"$suffix"*/kmx"${name#"$stem"}")
             test "${#matches[@]}" -eq 1
             cp "${matches[0]}" "$artifact_dir/$name"
             cmp "${matches[0]}" "$artifact_dir/$name"
@@ -311,6 +340,9 @@ jobs:
           cp dist/homebrew/Formula/kmx.rb "$artifact_dir/kmx.rb"
           cmp dist/checksums.txt "$artifact_dir/checksums.txt"
           cmp dist/homebrew/Formula/kmx.rb "$artifact_dir/kmx.rb"
+          # The staged binaries are exactly the six names the manifest lists.
+          diff <(cut -d' ' -f3 dist/checksums.txt | sort) \
+            <(find "$artifact_dir" -maxdepth 1 -type f -name 'kmx-*' -printf '%f\n' | sort)
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -358,6 +390,8 @@ jobs:
             "$artifact_dir/kmx-linux-arm64"
             "$artifact_dir/kmx-darwin-amd64"
             "$artifact_dir/kmx-darwin-arm64"
+            "$artifact_dir/kmx-windows-amd64.exe"
+            "$artifact_dir/kmx-windows-arm64.exe"
             "$artifact_dir/checksums.txt"
             "$artifact_dir/checksums.txt.sigstore.json"
             "$artifact_dir/kmx.rb"

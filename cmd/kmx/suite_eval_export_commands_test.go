@@ -71,7 +71,7 @@ func TestSuiteEvalExportHelpAndCompletionAreInert(t *testing.T) {
 }
 
 func TestSuiteEvalExportMissingProofIsOffline(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	root, output := suiteEvalSource(t)
 	var out, diagnostics bytes.Buffer
 	deps, loads := testDependencies(&out, &diagnostics)

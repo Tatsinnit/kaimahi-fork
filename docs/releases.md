@@ -56,13 +56,17 @@ ephemeral signing key, not a stored signing secret. Releases published before
 signing was enabled have no bundle.
 
 With cosign **v3.0.6 or newer** and GNU `sha256sum`, choose a signed release and
-download its four bare binaries, checksum manifest and bundle into an empty
-directory (the assets are not archives):
+download its bare binaries, checksum manifest and bundle into an empty
+directory (the assets are not archives). v0.8.1 and every earlier release have
+four Unix binaries. Native Windows binaries are **unreleased**: releases cut
+after the native port ships will also list `kmx-windows-amd64.exe` and
+`kmx-windows-arm64.exe` in `checksums.txt`. Verify the manifest first, then
+download exactly the named binaries:
 
 ```bash
 version='v<version>'
 base="https://github.com/kaimahi-agents/kaimahi/releases/download/$version"
-for asset in kmx-linux-amd64 kmx-linux-arm64 kmx-darwin-amd64 kmx-darwin-arm64 checksums.txt checksums.txt.sigstore.json; do
+for asset in checksums.txt checksums.txt.sigstore.json; do
   curl -fsSLO "$base/$asset"
 done
 
@@ -70,15 +74,26 @@ cosign verify-blob \
   --certificate-identity-regexp '^https://github\.com/kaimahi-agents/kaimahi/\.github/workflows/release\.yml@refs/tags/v[0-9][0-9A-Za-z_.-]*$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --bundle checksums.txt.sigstore.json \
-  checksums.txt && sha256sum -c checksums.txt
+  checksums.txt || exit 1
+
+while read -r checksum asset; do
+  case "$asset" in
+    kmx-linux-amd64|kmx-linux-arm64|kmx-darwin-amd64|kmx-darwin-arm64|kmx-windows-amd64.exe|kmx-windows-arm64.exe)
+      curl -fsSLO "$base/$asset" || exit 1 ;;
+    *) echo "unexpected release asset: $asset" >&2; exit 1 ;;
+  esac
+done < checksums.txt
+sha256sum -c checksums.txt
 ```
 
 On macOS, use `shasum -a 256 -c checksums.txt` instead of `sha256sum -c`.
 Verify the signature before checking digests or running a binary. The identity
 check accepts only this repo's release workflow running on a version tag.
 
-The signature covers the four binaries, **not** the separately published
-`kmx.rb` formula. `install.sh` and Homebrew check checksums only; they do not
+The signature covers `checksums.txt`, so it covers every binary that manifest
+names — the four Unix binaries of v0.8.1 and earlier releases, plus the two
+Windows `.exe` binaries in a future release that includes them — **not** the
+separately published `kmx.rb` formula. `install.sh` and Homebrew check checksums only; they do not
 automatically verify this bundle.
 
 ## Versions
@@ -112,6 +127,8 @@ only Go module; no paired module release tag is needed.
 **On Windows, use WSL for now.** Install and run the Linux build inside your
 WSL distribution, not PowerShell or Command Prompt. Native Windows builds and
 release binaries are not supported yet; track [Windows support in #578](https://github.com/kaimahi-agents/kaimahi/issues/578).
+No published release, including v0.8.1 and the current `@latest`, contains a
+Windows binary.
 
 With Homebrew on macOS or Linux:
 
@@ -120,7 +137,8 @@ brew install kaimahi-agents/tap/kmx
 ```
 
 The fully qualified name automatically adds the tap and trusts only this
-formula. It selects the matching one of the four release binaries for the
+formula. It selects the matching one of the four Unix release binaries (never a
+Windows asset) for the
 current OS and architecture, then verifies that asset's published SHA-256. The
 formula checksum detects a changed or truncated download;
 like `install.sh`, it is not an independent signature because both originate in
@@ -198,6 +216,30 @@ host or a Mac running one in a VM. Those are the four release platforms the
 installer and pinned toolchain support. On Windows, use the Linux build
 matching your WSL distribution's architecture (`amd64` or `arm64`). Native
 Windows support is tracked in [#578](https://github.com/kaimahi-agents/kaimahi/issues/578).
+`install.sh` and Homebrew remain Unix-only.
+
+#### Native Windows assets (unreleased)
+
+The release workflow is configured to add `kmx-windows-amd64.exe` and
+`kmx-windows-arm64.exe` to the next release built after the native port is
+qualified; until a release's `checksums.txt` lists them, they do not exist and
+WSL remains the route. Native scope is private state on local NTFS; see
+[#578](https://github.com/kaimahi-agents/kaimahi/issues/578). For such a
+release, verify the manifest signature first (see
+[Verify a release](#verify-a-release)), then in PowerShell:
+
+```powershell
+$version = 'v<version>'              # a release whose checksums.txt lists Windows assets
+$asset = 'kmx-windows-amd64.exe'     # or kmx-windows-arm64.exe
+$base = "https://github.com/kaimahi-agents/kaimahi/releases/download/$version"
+Invoke-WebRequest "$base/$asset" -OutFile $asset
+Invoke-WebRequest "$base/checksums.txt" -OutFile checksums.txt
+$entries = @(Get-Content checksums.txt | Where-Object { ($_ -split '\s+')[1] -ceq $asset })
+if ($entries.Count -ne 1) { throw "checksums.txt does not list $asset exactly once" }
+$want = ($entries[0] -split '\s+')[0].ToLowerInvariant()
+$got = (Get-FileHash -Algorithm SHA256 $asset).Hash.ToLowerInvariant()
+if ($want -cne $got) { throw 'checksum mismatch' }
+```
 
 A downloaded CLI needs no Go toolchain for native setup and agent workflows;
 it still requires the external tools described in [getting started](getting-started.md#prerequisites).
@@ -404,7 +446,11 @@ than the first.
 
 4. Watch the `release` workflow. It builds through
    [GoReleaser](../.goreleaser.yaml), checks that exact artifact set, then
-   publishes those same files together as one GitHub release. It refuses to
+   publishes those same files together as one GitHub release. Releases cut
+   from the current configuration build six binaries — the four Unix ones plus
+   `kmx-windows-amd64.exe` and `kmx-windows-arm64.exe` — and the job refuses a
+   manifest missing any of them; the formula still covers only the four Unix
+   binaries. It refuses to
    publish if: the version is not semantic, the changelog has no section,
    the built binary does not report the tag, or the checksums do not verify. The
    release also carries `kmx.rb`, GoReleaser's rendered formula for those exact checksums

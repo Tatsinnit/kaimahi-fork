@@ -12,7 +12,7 @@ import (
 // Old plane environment and cache files must neither influence native config
 // nor be cleaned up as a side effect of loading it.
 func TestNativeConfigAndCacheIgnoreOldPlaneSettings(t *testing.T) {
-	home := t.TempDir()
+	home := privateStateHome(t)
 	t.Setenv("KMX_HOME", home)
 	t.Setenv("KIND_CLUSTER", "native")
 	t.Setenv("KUBE_CTX", "kind-native")
@@ -70,9 +70,9 @@ func TestProductDefaultsAreUsable(t *testing.T) {
 }
 
 // KMX_HOME is the portable override. The unconfigured path stays native to
-// each OS through os.UserConfigDir rather than hard-coding Linux or macOS.
+// each OS: os.UserConfigDir on Unix, LocalAppData (never Roaming) on Windows.
 func TestStateDirUsesPortableOverrideAndNativeDefault(t *testing.T) {
-	home := t.TempDir()
+	home := privateStateHome(t)
 	xdg := filepath.Join(t.TempDir(), "xdg")
 	t.Setenv("KMX_HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", xdg)
@@ -81,30 +81,14 @@ func TestStateDirUsesPortableOverrideAndNativeDefault(t *testing.T) {
 	}
 
 	t.Setenv("KMX_HOME", "")
-	var want string
-	switch runtime.GOOS {
-	case "linux":
-		want = filepath.Join(xdg, "kmx")
-	case "darwin":
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			t.Fatal(err)
-		}
-		want = filepath.Join(userHome, "Library", "Application Support", "kmx")
-	default:
-		native, err := os.UserConfigDir()
-		if err != nil {
-			t.Fatal(err)
-		}
-		want = filepath.Join(native, "kmx")
-	}
+	want := expectedNativeStateDir(t, xdg)
 	if got, err := StateDir(); err != nil || got != want {
 		t.Fatalf("%s native state dir = %q, %v; want %q", runtime.GOOS, got, err, want)
 	}
 }
 
 func TestModelRecordsWhetherTheOperatorSelectedIt(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateStateHome(t))
 	t.Setenv("MODEL", "")
 	c, err := Load("")
 	if err != nil {
@@ -127,7 +111,7 @@ func TestModelRecordsWhetherTheOperatorSelectedIt(t *testing.T) {
 // operator meant and acting on whatever was left in the environment, so
 // assert the whole precedence chain.
 func TestContextResolutionOrder(t *testing.T) {
-	home := t.TempDir()
+	home := privateStateHome(t)
 	t.Setenv("KMX_HOME", home)
 	t.Setenv("KIND_CLUSTER", "mine")
 	t.Setenv("KUBE_CTX", "")
@@ -177,7 +161,7 @@ func TestContextResolutionOrder(t *testing.T) {
 // source has to say so. Labelling it KIND_CLUSTER made a made-up target
 // indistinguishable from one an operator typed.
 func TestAnUnchosenContextSaysItWasNotChosen(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateStateHome(t))
 	t.Setenv("KIND_CLUSTER", "")
 	t.Setenv("KUBE_CTX", "")
 	t.Setenv("CONTAINER_ENGINE", "")
@@ -199,7 +183,7 @@ func TestAnUnchosenContextSaysItWasNotChosen(t *testing.T) {
 // to docker would create a cluster the
 // operator's kind cannot see.
 func TestUnknownContainerEngineIsRefused(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateStateHome(t))
 	t.Setenv("CONTAINER_ENGINE", "containerd")
 	if _, err := Load(""); err == nil {
 		t.Fatal("an unknown CONTAINER_ENGINE must be refused")
@@ -207,7 +191,7 @@ func TestUnknownContainerEngineIsRefused(t *testing.T) {
 }
 
 func TestPodmanCarriesTheKindProvider(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateStateHome(t))
 	t.Setenv("CONTAINER_ENGINE", "podman")
 	c, err := Load("")
 	if err != nil {
@@ -246,7 +230,7 @@ func TestExplicitContainerEngineUsesEnvironmentValidation(t *testing.T) {
 }
 
 func TestContainerEngineFlagOverridesEvenAnInvalidEnvironment(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateStateHome(t))
 	t.Setenv("CONTAINER_ENGINE", "containerd")
 	c, err := LoadWithOverrides("", "podman")
 	if err != nil {

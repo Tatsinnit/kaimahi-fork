@@ -3,6 +3,7 @@ package workspace_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,7 +39,7 @@ func TestPrepareRefusesLegacyPackingWithoutReplacingCache(t *testing.T) {
 			if err := os.WriteFile(record, legacy, 0600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := workspace.Prepare(t.Context(), root, cache); err == nil || !strings.Contains(err.Error(), "packaging policy") || !strings.Contains(err.Error(), entry) || !strings.Contains(err.Error(), "move aside") {
+			if _, err := workspace.Prepare(t.Context(), root, cache); err == nil || !strings.Contains(err.Error(), "packaging policy") || !strings.Contains(err.Error(), fmt.Sprintf("%q", entry)) || !strings.Contains(err.Error(), "move aside") {
 				t.Fatalf("legacy cache needs an actionable refusal, got %v", err)
 			}
 			if !bytes.Equal(legacy, readFile(t, record)) {

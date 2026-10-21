@@ -5,13 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/config"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 )
 
 // Agent locations contain routing metadata, never model credential values.
@@ -42,30 +42,20 @@ func loadAgentLocations() ([]agentLocation, error) {
 	if err != nil {
 		return nil, err
 	}
-	files, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
 	var locations []agentLocation
-	for _, file := range files {
-		if file.IsDir() || !strings.HasSuffix(file.Name(), ".json") {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(dir, file.Name()))
-		if err != nil {
-			return nil, err
-		}
+	err = forEachPrivateAgentFile(dir, ".json", func(name string, raw []byte) error {
 		var location agentLocation
-		if err = json.Unmarshal(raw, &location); err != nil {
-			return nil, fmt.Errorf("invalid agent location %s", file.Name())
+		if err := json.Unmarshal(raw, &location); err != nil {
+			return fmt.Errorf("invalid agent location %s", name)
 		}
 		if location.Agent == "" || location.Namespace == "" || location.Context == "" {
-			return nil, fmt.Errorf("incomplete agent location %s", file.Name())
+			return fmt.Errorf("incomplete agent location %s", name)
 		}
 		locations = append(locations, location)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.Slice(locations, func(i, j int) bool { return locations[i].key() < locations[j].key() })
 	return locations, nil
@@ -76,7 +66,7 @@ func writeAgentLocation(location agentLocation, kubeconfig []byte) (agentLocatio
 	if err != nil {
 		return location, err
 	}
-	if err = os.MkdirAll(dir, 0700); err != nil {
+	if err = fileaccess.EnsurePrivatePath(dir); err != nil {
 		return location, err
 	}
 	key := fmt.Sprintf("%x", sha256.Sum256([]byte(location.key())))
@@ -93,27 +83,10 @@ func writeAgentLocation(location agentLocation, kubeconfig []byte) (agentLocatio
 	return location, writePrivateAgentFile(filepath.Join(dir, key+".json"), raw)
 }
 
-func writePrivateAgentFile(path string, raw []byte) error {
-	file, err := os.CreateTemp(filepath.Dir(path), ".agent-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(file.Name())
-	if _, err = file.Write(raw); err != nil {
-		file.Close()
-		return err
-	}
-	if err = file.Sync(); err != nil {
-		file.Close()
-		return err
-	}
-	if err = file.Close(); err != nil {
-		return err
-	}
-	// Go's Windows implementation uses MoveFileEx with REPLACE_EXISTING;
-	// do not delete the destination first and introduce a missing-file window.
-	return os.Rename(file.Name(), path)
-}
+// writePrivateAgentFile (private_state_{unix,windows}.go) atomically
+// replaces a private file: stage, write, flush, close, then rename over the
+// destination with replace semantics. Never delete the destination first and
+// introduce a missing-file window.
 
 func appAtAgentLocation(source *App, location agentLocation) *App {
 	app := *source

@@ -13,6 +13,7 @@ import (
 	kmxsuite "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite"
 	suiteoras "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/oras"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/workspace"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 )
 
 // SuiteBuildResult identifies one built sandbox image archive.
@@ -152,6 +153,10 @@ func (a *App) BuildSuite(
 	if err != nil {
 		return SuiteBuildResult{}, err
 	}
+	// Refuse a Linux output on a Windows drive mount before staging anything.
+	if err := fileaccess.RefuseWindowsDriveMount(outputPath); err != nil {
+		return SuiteBuildResult{}, err
+	}
 	if info, err := os.Lstat(outputPath); err == nil && info.IsDir() {
 		return SuiteBuildResult{}, fmt.Errorf("AgentSuite build output %s is a directory", outputPath)
 	} else if err != nil && !os.IsNotExist(err) {
@@ -166,15 +171,15 @@ func (a *App) BuildSuite(
 		return SuiteBuildResult{}, fmt.Errorf("AgentSuite build output parent %s is not a directory", parent)
 	}
 
-	stage, err := os.CreateTemp(parent, "."+filepath.Base(outputPath)+"-*")
+	stage, staged, err := createSuiteBuildStage(parent, outputPath)
 	if err != nil {
 		return SuiteBuildResult{}, fmt.Errorf("create staged AgentSuite build output: %w", err)
 	}
-	stagePath := stage.Name()
+	defer staged.release()
 	publish := true
 	defer func() {
 		if publish {
-			_ = os.Remove(stagePath)
+			staged.remove()
 		}
 	}()
 	result, buildErr := builder.Build(ctx, *plan, stage)
@@ -204,13 +209,13 @@ func (a *App) BuildSuite(
 	if err := stage.Close(); err != nil {
 		return SuiteBuildResult{}, fmt.Errorf("close AgentSuite build output: %w", err)
 	}
-	if err := os.Chmod(stagePath, 0o644); err != nil {
+	if err := staged.setMode(); err != nil {
 		return SuiteBuildResult{}, fmt.Errorf("set AgentSuite build output mode: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
 		return SuiteBuildResult{}, fmt.Errorf("publish AgentSuite build output canceled: %w", err)
 	}
-	if err := os.Rename(stagePath, outputPath); err != nil {
+	if err := staged.publish(); err != nil {
 		return SuiteBuildResult{}, fmt.Errorf("publish AgentSuite build output: %w", err)
 	}
 	publish = false

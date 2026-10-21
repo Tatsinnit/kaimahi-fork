@@ -11,6 +11,7 @@ import (
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/workspace"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/config"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/scaffold"
 )
 
@@ -31,28 +32,10 @@ func privateWorkspaceState(name string) (string, error) {
 		return "", err
 	}
 	base := filepath.Join(state, name)
-	// Refuse linked ancestors before creating local source or exclusive evidence.
-	for path := base; ; path = filepath.Dir(path) {
-		info, err := os.Lstat(path)
-		if err != nil && !os.IsNotExist(err) {
-			return "", err
-		}
-		if err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
-			return "", errors.New("quickstart state requires unlinked directories")
-		}
-		if path == filepath.Dir(path) {
-			break
-		}
-	}
-	if err := os.MkdirAll(base, 0700); err != nil {
+	// Refuse linked or non-private state before creating local source or
+	// exclusive evidence.
+	if err := ensurePrivateWorkspaceState(base); err != nil {
 		return "", err
-	}
-	info, err := os.Stat(base)
-	if err != nil {
-		return "", err
-	}
-	if info.Mode().Perm()&0077 != 0 {
-		return "", errors.New("quickstart state must be private")
 	}
 	return base, nil
 }
@@ -70,13 +53,13 @@ func (a *App) quickstartSuiteSource(ctx context.Context) (string, string, error)
 	if err != nil {
 		return "", "", err
 	}
-	stage, err := os.MkdirTemp(base, "source-check-")
+	stage, err := fileaccess.PrivateTempDir(base, "source-check-")
 	if err != nil {
 		return "", "", err
 	}
 	defer os.RemoveAll(stage)
 	input := filepath.Join(stage, "instructions.md")
-	if err := os.WriteFile(input, []byte(scaffold.DefaultOrkaInstructions(QuickstartAgent)), 0600); err != nil {
+	if err := fileaccess.WritePrivateFile(input, []byte(scaffold.DefaultOrkaInstructions(QuickstartAgent)), 0600); err != nil {
 		return "", "", err
 	}
 	opt := workspace.CreateOptions{Name: QuickstartAgent, Model: a.Cfg.Model, Description: "The agent kmx quickstart deploys to answer a first question", InstructionsFile: input}
@@ -132,7 +115,7 @@ func (a *App) prepareWorkspaceSuiteLift(ctx context.Context, opt suiteWorkspaceL
 	}
 	// Keep passing evidence after errors for diagnosis, but never reuse it as the
 	// next invocation's output. It is outside source and the prepared cache.
-	run, err := os.MkdirTemp(base, "run-")
+	run, err := fileaccess.PrivateTempDir(base, "run-")
 	if err != nil {
 		return nil, err
 	}

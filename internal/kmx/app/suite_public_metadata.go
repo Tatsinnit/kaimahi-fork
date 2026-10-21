@@ -247,7 +247,7 @@ func (s *suitePassStore) publishPublicMetadata(ctx context.Context, raw []byte, 
 			}
 			count++
 			info, e := entry.Info()
-			if e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > maxSuitePublicMetadataBytes {
+			if e != nil || !info.Mode().IsRegular() || !privateEntryOK(root, entry.Name(), info) || info.Size() > maxSuitePublicMetadataBytes {
 				return errSuitePublicCapacity
 			}
 			total += info.Size()
@@ -283,7 +283,7 @@ func (s *suitePassStore) readPublicMetadata(ctx context.Context, suite *workspac
 	}
 	expected := suitePublicMetadata{Workspace: s.identity, SuiteDigest: s.suiteDigest, Sequence: scan.selectedSequence, ReceiptDigest: suitePublicHash(canonical)}
 	root, name, parent, err := openSessionReferenceDirectory(filepath.Join(s.partition, expected.filename()))
-	if err != nil || parent.Mode().Perm()&0077 != 0 {
+	if err != nil || !privateDirOK(root, parent) {
 		if root != nil {
 			root.Close()
 		}
@@ -304,15 +304,16 @@ func (s *suitePassStore) readPublicMetadata(ctx context.Context, suite *workspac
 		return nil, errSuitePublicMetadata
 	}
 	before, e := f.Stat()
-	if e != nil || !before.Mode().IsRegular() || before.Mode().Perm()&0077 != 0 || before.Size() > maxSuitePublicMetadataBytes {
+	if e != nil || !before.Mode().IsRegular() || !privateFileOK(f, before) || before.Size() > maxSuitePublicMetadataBytes {
 		f.Close()
 		return nil, errSuitePublicMetadata
 	}
 	raw, e := io.ReadAll(io.LimitReader(f, maxSuitePublicMetadataBytes+1))
 	after, a := f.Stat()
+	stillPrivate := privateHandleOK(f)
 	closeErr := f.Close()
 	current, c := root.Lstat(name)
-	if e != nil || a != nil || c != nil || closeErr != nil || !os.SameFile(before, current) || before.Size() != after.Size() || before.Mode() != after.Mode() || !before.ModTime().Equal(after.ModTime()) || int64(len(raw)) != before.Size() {
+	if e != nil || a != nil || c != nil || closeErr != nil || !stillPrivate || !os.SameFile(before, current) || before.Size() != after.Size() || before.Mode() != after.Mode() || !before.ModTime().Equal(after.ModTime()) || int64(len(raw)) != before.Size() {
 		return nil, errSuitePublicMetadata
 	}
 	var m suitePublicMetadata
@@ -334,7 +335,8 @@ func (s *suitePassStore) readPublicMetadata(ctx context.Context, suite *workspac
 	if openErr != nil {
 		return nil, errSuitePublicMetadata
 	}
-	if fresh.Close() != nil || !os.SameFile(parent, now) || now.Mode().Perm()&0077 != 0 {
+	private := privateDirOK(fresh, now)
+	if fresh.Close() != nil || !os.SameFile(parent, now) || !private {
 		return nil, errSuitePublicMetadata
 	}
 	return &m, nil

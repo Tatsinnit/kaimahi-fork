@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/config"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 )
 
 // Remember identities, not list positions: Azure names can repeat between
@@ -24,7 +25,7 @@ func loadLiftPreferences() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := readPrivatePreference(path)
 	if os.IsNotExist(err) {
 		return map[string]string{}, nil
 	}
@@ -51,7 +52,7 @@ func saveLiftPreference(scope, identity string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := fileaccess.EnsurePrivatePath(filepath.Dir(path)); err != nil {
 		return err
 	}
 	raw, err := json.MarshalIndent(prefs, "", "  ")

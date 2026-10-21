@@ -110,7 +110,7 @@ func TestCLIMigrationPushRefusalsPrecedeConfigurationAndPreparation(t *testing.T
 		{[]string{"suite", "push", "--workspace", "missing", "team:v1"}, "unknown flag: --workspace"},
 	} {
 		t.Run(strings.Join(tc.args, "_"), func(t *testing.T) {
-			state := t.TempDir()
+			state := privateTestStateDir(t)
 			t.Setenv("KMX_HOME", state)
 			t.Chdir(t.TempDir())
 			var out, diagnostics bytes.Buffer
@@ -236,9 +236,13 @@ case "$*" in
 *"get providers"*) printf '%s' 'local=true ';;
 esac
 `
-	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(body), 0700); err != nil {
-		t.Fatal(err)
-	}
+	installFakeTool(t, dir, "kubectl", body, fakeTool{Log: log, LogLine: "${ARGS}", Rules: []fakeToolRule{
+		{Match: "contains", Args: "config view", Stdout: `{"current-context":"kind-test","contexts":[{"name":"kind-test","context":{"cluster":"kind-test"}}],"clusters":[{"name":"kind-test","cluster":{"server":"https://127.0.0.1:6443"}}]}`},
+		{Match: "suffix", Args: "get deploy -o json", Stdout: `{"items":[{"metadata":{"name":"chart-controller","labels":{"app.kubernetes.io/component":"controller","app.kubernetes.io/name":"orka"}},"spec":{"template":{"spec":{"containers":[{"image":"ghcr.io/orka-agents/orka:0.2.0"}]}}}}]}`},
+		{Match: "contains", Args: "get deploy", Stdout: "orka-controller=1/1 "},
+		{Match: "contains", Args: "get crd", Stdout: "agents.core.orka.ai providers.core.orka.ai "},
+		{Match: "contains", Args: "get providers", Stdout: "local=true "},
+	}})
 	var reports, reads []string
 	for _, path := range [][]string{{"orka", "status"}, {"orka", "status", "-o", "table"}} {
 		if err := os.WriteFile(log, nil, 0600); err != nil {
@@ -267,7 +271,7 @@ esac
 }
 
 func TestCLIMigrationPushMalformedNearestMarkerStopsDiscovery(t *testing.T) {
-	root, state := t.TempDir(), t.TempDir()
+	root, state := t.TempDir(), privateTestStateDir(t)
 	t.Setenv("KMX_HOME", state)
 	instructions := filepath.Join(t.TempDir(), "instructions.md")
 	if err := os.WriteFile(instructions, []byte("Answer briefly.\n"), 0600); err != nil {

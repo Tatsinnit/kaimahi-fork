@@ -21,7 +21,7 @@ func TestWorkspaceCreateAndPushAreOfflineAndPreserveDigest(t *testing.T) {
 	if err := os.WriteFile(instructions, []byte("Answer briefly.\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("CONTAINER_ENGINE", "not-an-engine")
 	var out, diagnostics bytes.Buffer
@@ -117,7 +117,7 @@ func TestCreateWithoutLiveAuthorsNonOrkaMember(t *testing.T) {
 			if err := os.WriteFile(input, []byte("Exact instructions.\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			t.Setenv("PATH", t.TempDir())
 			var out, diagnostics bytes.Buffer
 			deps, loads := testDependencies(&out, &diagnostics)
@@ -258,7 +258,7 @@ func TestWorkspaceSelectorsRejectEmptyAndAmbiguousSource(t *testing.T) {
 
 func TestWorkspaceRegistryPushProvenanceControls(t *testing.T) {
 	t.Setenv("DOCKER_CONFIG", t.TempDir())
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	root := filepath.Join(t.TempDir(), "workspace")
 	input := filepath.Join(t.TempDir(), "instructions.md")
 	if err := os.WriteFile(input, []byte("Answer briefly.\n"), 0600); err != nil {
@@ -327,7 +327,7 @@ func TestWorkspaceProvenanceFlagsRefuseConflictsBeforePreparation(t *testing.T) 
 		{"--to-layout", "missing-layout", "--provenance=false"},
 		{"--to-layout", "missing-layout", "--require-provenance"},
 	} {
-		state := t.TempDir()
+		state := privateTestStateDir(t)
 		t.Setenv("KMX_HOME", state)
 		var out, diagnostics bytes.Buffer
 		deps, loads := testDependencies(&out, &diagnostics)
@@ -382,7 +382,7 @@ func TestWorkspaceProfileParseErrorsDoNotDiscloseContent(t *testing.T) {
 		if err := os.WriteFile(input, []byte("Answer briefly.\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		t.Setenv("KMX_HOME", t.TempDir())
+		t.Setenv("KMX_HOME", privateTestStateDir(t))
 		var out, diagnostics bytes.Buffer
 		deps, loads := testDependencies(&out, &diagnostics)
 		if err := execute([]string{"create", "greeter", "--workspace", root, "--model", "test-model", "--instructions", input}, deps); err != nil {
@@ -449,7 +449,7 @@ func TestWorkspacePushRoutingAndArity(t *testing.T) {
 		{"extracted bypass", []string{"suite", "push"}, []string{fixture, "team:v1"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root, state := t.TempDir(), t.TempDir()
+			root, state := t.TempDir(), privateTestStateDir(t)
 			if tc.want == "" {
 				if err := os.WriteFile(filepath.Join(root, "workspace.yaml"), []byte("broken: [\n"), 0600); err != nil {
 					t.Fatal(err)

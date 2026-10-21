@@ -269,9 +269,7 @@ func TestPrepareRefusesCredentialFilenamesAndNonprivateCacheEntries(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chmod(filepath.Dir(p.Path), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		makeEntryShared(t, filepath.Dir(p.Path))
 		if _, err := workspace.Prepare(context.Background(), root, cache); err == nil {
 			t.Fatal("reused nonprivate cache entry")
 		}

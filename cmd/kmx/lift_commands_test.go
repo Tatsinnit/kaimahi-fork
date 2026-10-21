@@ -71,7 +71,7 @@ func TestAKSRefusesAnUnusableRequestBeforeTouchingAnything(t *testing.T) {
 			// Never the operator's real state directory: a test that reads
 			// or writes run records would be reading somebody's account of
 			// live cloud resources.
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			var out, errOut bytes.Buffer
 			deps, _ := testDependencies(&out, &errOut)
 			err := execute(tc.args, deps)
@@ -123,7 +123,7 @@ func TestAKSTeardownTakesTheSameIdentityAndBranchFlagsAsSetup(t *testing.T) {
 // Fail at the explicit inert policy boundary before any cloud preflight;
 // a missing payload would fail earlier if the Orka default were not applied.
 func TestAKSUpDefaultsToOrkaWithoutContactingAzure(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	var out, errOut bytes.Buffer
 	deps, _ := testDependencies(&out, &errOut)
 	err := execute([]string{"aks", "up", "--resource-group", "rg", "--cluster", "c", "--registry", "reg12345", "--network-policy", ""}, deps)
@@ -133,7 +133,7 @@ func TestAKSUpDefaultsToOrkaWithoutContactingAzure(t *testing.T) {
 }
 
 func TestAKSDownStillReachesTeardownValidation(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	var out, errOut bytes.Buffer
 	deps, _ := testDependencies(&out, &errOut)
 	err := execute([]string{"aks", "down"}, deps)

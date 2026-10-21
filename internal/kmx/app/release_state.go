@@ -304,7 +304,7 @@ func (a *App) writeReleaseState(ctx context.Context, before *releaseStateSnapsho
 	if err != nil {
 		return nil, errReleaseState
 	}
-	response, err := a.orkaCapture(ctx, body, "-n", next.Target.Namespace, "patch", "configmap", releaseStateName(next.Suite, next.Member, next.Runtime),
+	response, err := a.orkaPatchCapture(ctx, body, "-n", next.Target.Namespace, "patch", "configmap", releaseStateName(next.Suite, next.Member, next.Runtime),
 		"--type=json", "--patch-file=/dev/stdin", "-o", "json")
 	if err != nil {
 		return nil, errors.Join(errReleaseStateWrite, err)

@@ -19,7 +19,7 @@ import (
 
 func TestReadArtifactSelectsOnlyRequestedLayoutGraph(t *testing.T) {
 	layout := filepath.Join(t.TempDir(), "layout")
-	p, err := Push(t.Context(), filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), layout, "suite:v1")
+	p, err := Push(t.Context(), fixtureSource(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal")), layout, "suite:v1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestReadArtifactDuplicateRootMustBeIdentityEquivalent(t *testing.T) {
 	for _, conflict := range []bool{false, true} {
 		t.Run(fmt.Sprint("conflict-", conflict), func(t *testing.T) {
 			layout := filepath.Join(t.TempDir(), "layout")
-			p, err := Push(t.Context(), filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), layout, "suite:v1")
+			p, err := Push(t.Context(), fixtureSource(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal")), layout, "suite:v1")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -98,7 +98,7 @@ func TestReadArtifactDuplicateRootMustBeIdentityEquivalent(t *testing.T) {
 
 func TestReadArtifactPreservesUnsupportedPlatformFieldsForValidation(t *testing.T) {
 	layout := filepath.Join(t.TempDir(), "layout")
-	if _, err := Push(t.Context(), filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), layout, "suite:v1"); err != nil {
+	if _, err := Push(t.Context(), fixtureSource(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal")), layout, "suite:v1"); err != nil {
 		t.Fatal(err)
 	}
 	indexPath := filepath.Join(layout, "index.json")
@@ -139,7 +139,7 @@ func TestReadArtifactRefusesLayoutFIFOWithoutBlocking(t *testing.T) {
 	for _, relative := range []string{"oci-layout", "index.json", "blobs/sha256/" + strings.Repeat("a", 64)} {
 		t.Run(strings.ReplaceAll(relative, "/", "-"), func(t *testing.T) {
 			layout := filepath.Join(t.TempDir(), "layout")
-			p, err := Push(t.Context(), filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), layout, "suite:v1")
+			p, err := Push(t.Context(), fixtureSource(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal")), layout, "suite:v1")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -169,7 +169,7 @@ func TestReadArtifactRefusesLayoutFIFOWithoutBlocking(t *testing.T) {
 	for _, child := range []string{"config", "content"} {
 		t.Run(child, func(t *testing.T) {
 			layout := filepath.Join(t.TempDir(), "layout")
-			p, err := Push(t.Context(), filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), layout, "suite:v1")
+			p, err := Push(t.Context(), fixtureSource(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal")), layout, "suite:v1")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -211,7 +211,7 @@ func TestReadArtifactRefusesLayoutSymlinkAndOversizedIndex(t *testing.T) {
 	for _, tc := range []string{"index budget", "index symlink", "blob symlink"} {
 		t.Run(tc, func(t *testing.T) {
 			layout := filepath.Join(t.TempDir(), "layout")
-			p, err := Push(t.Context(), filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), layout, "suite:v1")
+			p, err := Push(t.Context(), fixtureSource(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal")), layout, "suite:v1")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -235,9 +235,7 @@ func TestReadArtifactRefusesLayoutSymlinkAndOversizedIndex(t *testing.T) {
 				if err := os.Remove(name); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.Symlink(target, name); err != nil {
-					t.Fatal(err)
-				}
+				mustSymlink(t, target, name)
 			}
 			if _, err := ReadArtifactLayout(t.Context(), layout, p.Descriptor.Digest.String()); !errors.Is(err, ErrArtifact) {
 				t.Fatalf("unsafe source accepted: %v", err)

@@ -54,7 +54,7 @@ func TestConsoleMutationMenusRefuseWithoutDispatch(t *testing.T) {
 }
 
 func TestConsoleInferenceSaveRefusesBeforeReadsAuthOrWrites(t *testing.T) {
-	home := t.TempDir()
+	home := privateSuiteDir(t)
 	t.Setenv("KMX_HOME", home)
 	for _, kind := range []string{"cluster", "ollama", "foundry-cluster", "foundry", "copilot"} {
 		t.Run(kind, func(t *testing.T) {

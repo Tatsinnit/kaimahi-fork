@@ -16,7 +16,7 @@ import (
 )
 
 func TestTargetsOfflineDoesNotLoadConfigOrTools(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	t.Setenv("PATH", t.TempDir())
 	for _, output := range []string{"table", "json"} {
 		t.Run(output, func(t *testing.T) {

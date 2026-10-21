@@ -24,6 +24,14 @@ to do. Sections: **Added**, **Changed**, **Fixed**, **Breaking**, **Upgrading**.
 
 ### Added
 
+- Native Windows CLI builds and future bare `.exe` release assets for amd64 and
+  arm64. Native amd64 NTFS tests cover private ACLs, physical-alias locks,
+  durable-publication API ordering and offline create/local-push/pull validation;
+  arm64 is cross-built and vetted, not natively executed. Windows defaults to
+  `%LOCALAPPDATA%\kmx`, retains `KMX_HOME`, and requires no WSL for offline
+  operations. Unsafe existing private state is refused, never repaired. Existing
+  v0.8.1 binaries remain Unix-only. See [Windows boundaries](docs/windows.md).
+
 - Experimental offline multi-agent flow authoring with `kmx create NAME
   --workspace DIR --members FILE --flow FILE`, deterministic preparation and
   explicit native/public layout/archive inventory readers. Strict JSON imports
@@ -141,6 +149,12 @@ to do. Sections: **Added**, **Changed**, **Fixed**, **Breaking**, **Upgrading**.
 
 ### Breaking
 
+- Linux refuses recognized Windows-drive `drvfs`/`9p` paths for kmx state,
+  caches and outputs. Native and WSL writers must use separate physical
+  locations; there is no cross-kernel locking protocol. Errors name the selected
+  path and recommend a Linux path or native Windows kmx. Read-only Windows
+  sources/tools remain allowed; unobserved Windows-drive `virtiofs` mounts are
+  not detected. See [storage isolation](docs/windows.md#native-windows-and-wsl-must-not-share-writable-state).
 - Older preparation-cache entries refuse without a current packing-policy marker.
   Move aside only the named entry and retry; keep managed passing state and
   standalone receipts. Rebuilding a different artifact requires fresh evaluation,

@@ -23,12 +23,15 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
-    # kmx drives a Linux container runtime, so the machine running it is a
-    # Linux host or a Mac running one in a VM (docs/releases.md#install) —
-    # the same four platforms as before, no windows/amd64.
+    # Six targets: the four Unix platforms every published release carries,
+    # plus native Windows amd64/arm64 for releases cut from this config. No
+    # published release contains a Windows binary yet (docs/releases.md).
+    # Native filesystem qualification retired the platform guard. The release
+    # workflow verifies all six artifacts, provenance and checksums before upload.
     #
     # Remove checkout paths from compiled binaries. The release workflow
     # separately checks the embedded VCS revision and clean-tree provenance.
@@ -40,7 +43,9 @@ builds:
 archives:
   # No archive: the release ships bare binaries, matching install.sh,
   # docs/releases.md's "by hand" instructions and the sha256sum-based
-  # checksum verification they document.
+  # checksum verification they document. The binary format appends the build
+  # extension, so Windows assets are kmx-windows-amd64.exe and
+  # kmx-windows-arm64.exe; Unix asset names are unchanged.
   - formats: ["binary"]
     name_template: "kmx-{{ .Os }}-{{ .Arch }}"
 
@@ -52,7 +57,9 @@ release:
   prerelease: auto
 
 # Rendered locally into dist/homebrew/Formula/kmx.rb and never pushed from
-# here (skip_upload: true). A maintainer downloads that exact asset and opens
+# here (skip_upload: true). GoReleaser's brew pipe selects only darwin and
+# linux artifacts, so the formula keeps the four Unix assets and no Windows.
+# The release workflow checks that. A maintainer downloads that exact asset and opens
 # a reviewed pull request against kaimahi-agents/homebrew-tap — see
 # docs/releases.md#cutting-a-release, step 5.
 brews:

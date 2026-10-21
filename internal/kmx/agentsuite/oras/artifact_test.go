@@ -21,7 +21,7 @@ import (
 )
 
 func TestReadArtifactKeepsExactDigestAndOwnedBytes(t *testing.T) {
-	source := filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal")
+	source := fixtureSource(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"))
 	layout := filepath.Join(t.TempDir(), "layout")
 	p, err := Push(t.Context(), source, layout, "minimal:v1")
 	if err != nil {
@@ -77,7 +77,7 @@ func TestReadArtifactRegistryIsPullOnly(t *testing.T) {
 	defer server.Close()
 	t.Setenv("DOCKER_CONFIG", t.TempDir())
 	ref := strings.TrimPrefix(server.URL, "http://") + "/team/suite:v1"
-	p, err := PushRegistry(t.Context(), filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), ref, true, false, PushOptions{})
+	p, err := PushRegistry(t.Context(), fixtureSource(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal")), ref, true, false, PushOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestArtifactNativeInventoryFileBudgets(t *testing.T) {
 }
 
 func TestReadArtifactDoesNotMutateLayout(t *testing.T) {
-	src := filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal")
+	src := fixtureSource(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"))
 	layout := filepath.Join(t.TempDir(), "layout")
 	p, err := Push(t.Context(), src, layout, "minimal:v1")
 	if err != nil {

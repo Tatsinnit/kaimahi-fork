@@ -48,7 +48,7 @@ func (p *PreparedWorkspaceLift) liftRecord(ctx context.Context, kind, scope stri
 		return nil, errWorkspaceLiftState
 	}
 	defer root.Close()
-	if parent.Mode().Perm()&0077 != 0 {
+	if !privateDirOK(root, parent) {
 		return nil, errWorkspaceLiftState
 	}
 	dir, err := root.Open(".")
@@ -100,8 +100,9 @@ func (p *PreparedWorkspaceLift) liftRecord(ctx context.Context, kind, scope stri
 	if e2 != nil {
 		return nil, errWorkspaceLiftState
 	}
+	private := privateDirOK(fresh, parentNow)
 	closeErr = errors.Join(closeErr, fresh.Close())
-	if err != nil || closeErr != nil || e != nil || !os.SameFile(info, opened) || !os.SameFile(info, now) || !os.SameFile(parent, parentNow) || parentNow.Mode().Perm()&0077 != 0 || now.Mode().Perm()&0077 != 0 {
+	if err != nil || closeErr != nil || e != nil || !os.SameFile(info, opened) || !os.SameFile(info, now) || !os.SameFile(parent, parentNow) || !private || !privateEntryOK(root, name, now) {
 		return nil, errWorkspaceLiftState
 	}
 	var r workspaceLiftRecord

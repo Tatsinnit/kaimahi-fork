@@ -12,7 +12,7 @@ import (
 	"regexp"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/config"
-	"golang.org/x/sys/unix"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 )
 
 const (
@@ -68,7 +68,7 @@ func (w *releaseLiftRecordWriter) probePersistence(ctx context.Context) (err err
 		return err
 	}
 	name, err := randomHex(16)
-	if err != nil || w.root.Mkdir(name, 0700) != nil {
+	if err != nil || mkdirPrivate(w.root, name) != nil {
 		return releaseLiftRecordError("storage creation probe failed")
 	}
 	owned, err := w.root.Lstat(name)
@@ -94,7 +94,7 @@ func (w *releaseLiftRecordWriter) probePersistence(ctx context.Context) (err err
 		if e != nil || !os.SameFile(current, owned) || w.root.Remove(name) != nil {
 			cleanupFailed = true
 		}
-		dir, e := w.root.Open(".")
+		dir, e := fileaccess.OpenSyncDirectory(w.root)
 		if e != nil {
 			cleanupFailed = true
 		} else if errors.Join(dir.Sync(), dir.Close()) != nil {
@@ -104,7 +104,7 @@ func (w *releaseLiftRecordWriter) probePersistence(ctx context.Context) (err err
 			err = errors.Join(err, releaseLiftRecordError("storage probe cleanup uncertain"))
 		}
 	}()
-	child, err = w.root.OpenRoot(name)
+	child, err = openChildRoot(w.root, name)
 	if err != nil {
 		return releaseLiftRecordError("storage probe open failed")
 	}
@@ -113,7 +113,7 @@ func (w *releaseLiftRecordWriter) probePersistence(ctx context.Context) (err err
 	if openErr != nil || currentErr != nil || !os.SameFile(owned, opened) || !os.SameFile(owned, current) {
 		return releaseLiftRecordError("storage probe directory changed")
 	}
-	file, err := child.OpenFile("probe", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	file, err := createPrivateFile(child, "probe", os.O_WRONLY|os.O_CREATE|os.O_EXCL)
 	if err != nil {
 		return releaseLiftRecordError("storage write probe failed")
 	}
@@ -124,7 +124,7 @@ func (w *releaseLiftRecordWriter) probePersistence(ctx context.Context) (err err
 	if errors.Join(err, writeErr, syncErr, closeErr) != nil {
 		return releaseLiftRecordError("storage persistence probe failed")
 	}
-	dir, err := child.Open(".")
+	dir, err := fileaccess.OpenSyncDirectory(child)
 	if err != nil {
 		return releaseLiftRecordError("storage directory probe failed")
 	}
@@ -140,7 +140,7 @@ func openReleaseLiftStorage(ctx context.Context) (_ *releaseLiftRecordWriter, er
 	}
 	state, err := config.StateDir()
 	if err != nil {
-		return nil, releaseLiftRecordError("unsafe storage location")
+		return nil, filesystemBoundaryError(releaseLiftRecordError("unsafe storage location"), err)
 	}
 	base := filepath.Join(state, "release-lifts")
 	for i, path := range []string{state, base} {
@@ -162,20 +162,20 @@ func openReleaseLiftStorage(ctx context.Context) (_ *releaseLiftRecordWriter, er
 	if err != nil {
 		return nil, releaseLiftRecordError("unsafe storage directory")
 	}
-	fd, openErr := unix.Openat(int(dir.Fd()), "lock", unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0600)
+	lock, openErr := openReleaseLiftLock(dir)
 	closeErr := dir.Close()
 	if openErr != nil {
 		return nil, releaseLiftRecordError("unsafe storage lock")
 	}
-	w.lock = os.NewFile(uintptr(fd), "lock")
+	w.lock = lock
 	if closeErr != nil {
 		return nil, releaseLiftRecordError("unsafe storage directory")
 	}
 	w.lockInfo, err = w.lock.Stat()
-	if err != nil || !w.lockInfo.Mode().IsRegular() || w.lockInfo.Mode().Perm()&0077 != 0 {
+	if err != nil || !w.lockInfo.Mode().IsRegular() || !privateFileOK(w.lock, w.lockInfo) {
 		return nil, releaseLiftRecordError("unsafe storage lock")
 	}
-	if unix.Flock(int(w.lock.Fd()), unix.LOCK_EX|unix.LOCK_NB) != nil {
+	if tryLockFile(w.lock) != nil {
 		return nil, releaseLiftRecordError("another Lift record reservation is active")
 	}
 	if err := w.unchanged(); err != nil {
@@ -196,9 +196,10 @@ func (w *releaseLiftRecordWriter) unchanged() error {
 		return releaseLiftRecordError("unsafe changed storage directory")
 	}
 	before, statErr := w.root.Stat(".")
+	private := privateDirOK(fresh, parent)
 	closeErr := fresh.Close()
 	lock, lockErr := w.root.Lstat("lock")
-	if statErr != nil || closeErr != nil || lockErr != nil || parent.Mode().Perm()&0077 != 0 || !os.SameFile(before, parent) || !lock.Mode().IsRegular() || lock.Mode().Perm()&0077 != 0 || !os.SameFile(w.lockInfo, lock) {
+	if statErr != nil || closeErr != nil || lockErr != nil || !private || !os.SameFile(before, parent) || !lock.Mode().IsRegular() || !privateEntryOK(w.root, "lock", lock) || !os.SameFile(w.lockInfo, lock) {
 		return releaseLiftRecordError("unsafe changed storage directory or lock")
 	}
 	return nil
@@ -232,10 +233,10 @@ func (w *releaseLiftRecordWriter) capacity(ctx context.Context) error {
 		}
 		count++
 		info, err := w.root.Lstat(name)
-		if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
+		if err != nil || !info.IsDir() || !privateEntryDirOK(w.root, name, info) {
 			return releaseLiftRecordError("unsafe attempt directory")
 		}
-		child, err := w.root.OpenRoot(name)
+		child, err := openChildRoot(w.root, name)
 		if err != nil {
 			return releaseLiftRecordError("unsafe attempt directory")
 		}
@@ -274,7 +275,7 @@ func releaseLiftRecordDirectoryBytes(ctx context.Context, root *os.Root) (int64,
 			return 0, err
 		}
 		info, err := root.Lstat(name)
-		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		if err != nil || !info.Mode().IsRegular() || !privateEntryOK(root, name, info) {
 			return 0, releaseLiftRecordError("unsafe record file")
 		}
 		if info.Size() > maxReleaseLiftRecordBytes {
@@ -313,7 +314,7 @@ func preflightReleaseLiftRecord(ctx context.Context, id string, summary ReleaseL
 	}()
 	w.id, w.summary = id, summaryRaw
 	w.receipt, w.annotation = append([]byte(nil), receipt...), json.RawMessage(annotation)
-	if err := w.root.Mkdir(id, 0700); err != nil {
+	if err := mkdirPrivate(w.root, id); err != nil {
 		if os.IsExist(err) {
 			return nil, releaseLiftRecordError("record ID collision")
 		}
@@ -331,15 +332,15 @@ func preflightReleaseLiftRecord(ctx context.Context, id string, summary ReleaseL
 		if err != nil {
 			return nil, releaseLiftRecordError("unsafe attempt directory")
 		}
-		if parent.Mode().Perm()&0077 != 0 {
+		if !privateDirOK(root, parent) {
 			root.Close()
 			return nil, releaseLiftRecordError("unsafe attempt directory")
 		}
-		if _, err := root.Lstat(leaf); !os.IsNotExist(err) {
+		if !absentLeaf(root, leaf) {
 			root.Close()
 			return nil, releaseLiftRecordError("record slot collision")
 		}
-		dir, err := root.Open(".")
+		dir, err := fileaccess.OpenSyncDirectory(root)
 		if err != nil {
 			root.Close()
 			return nil, releaseLiftRecordError("unsafe attempt directory")
@@ -359,7 +360,7 @@ func preflightReleaseLiftRecord(ctx context.Context, id string, summary ReleaseL
 		return nil, err
 	}
 	// Sync the new attempt's parent before allowing native effects.
-	dir, err := w.root.Open(".")
+	dir, err := fileaccess.OpenSyncDirectory(w.root)
 	if err != nil {
 		return nil, releaseLiftRecordError("intent durability uncertain")
 	}
@@ -394,7 +395,7 @@ func (w *releaseLiftRecordWriter) write(ctx context.Context, state string, resou
 			return releaseLiftRecordError("unsafe changed attempt directory")
 		}
 		if i >= w.next {
-			if _, err := output.root.Lstat(output.name); !os.IsNotExist(err) {
+			if !absentLeaf(output.root, output.name) {
 				return releaseLiftRecordError("record slot collision")
 			}
 		}
@@ -446,7 +447,7 @@ func (w *releaseLiftRecordWriter) closeOutputs() (err error) {
 func (w *releaseLiftRecordWriter) commitAcknowledgment(ctx context.Context) error {
 	output := w.outputs[4]
 	candidate, err := output.root.Lstat(output.name)
-	if err != nil || !candidate.Mode().IsRegular() || candidate.Mode().Perm()&0077 != 0 || candidate.Size() > maxReleaseLiftRecordBytes {
+	if err != nil || !candidate.Mode().IsRegular() || !privateEntryOK(output.root, output.name, candidate) || candidate.Size() > maxReleaseLiftRecordBytes {
 		return errReleaseLiftProvenance
 	}
 	w.commitRoot = output.root

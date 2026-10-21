@@ -311,7 +311,7 @@ func TestRegistryPushTagPreflight(t *testing.T) {
 		registry.ServeHTTP(w, r)
 	}))
 	defer server.Close()
-	source := filepath.Join(t.TempDir(), "source")
+	source := privateFixtureDir(t, filepath.Join(t.TempDir(), "source"))
 	copyDirectory(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), source)
 	reference := strings.TrimPrefix(server.URL, "http://") + "/team/suite:v1"
 	first, err := PushRegistry(context.Background(), source, reference, true, false, PushOptions{})
@@ -380,7 +380,7 @@ func TestRegistryPushTagPreflight(t *testing.T) {
 
 func TestRegistryPushExistenceFailure(t *testing.T) {
 	t.Setenv("DOCKER_CONFIG", t.TempDir())
-	source := filepath.Join(t.TempDir(), "source")
+	source := privateFixtureDir(t, filepath.Join(t.TempDir(), "source"))
 	copyDirectory(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), source)
 	var mutations, tagChecks atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -420,7 +420,7 @@ func TestRegistryPushValidatesBeforePreflight(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
-	_, err := PushRegistry(context.Background(), t.TempDir(), strings.TrimPrefix(server.URL, "http://")+"/team:v1", true, false, PushOptions{})
+	_, err := PushRegistry(context.Background(), emptyFixtureDir(t), strings.TrimPrefix(server.URL, "http://")+"/team:v1", true, false, PushOptions{})
 	if err == nil || !strings.Contains(err.Error(), "validate AgentSuite directory") || !strings.Contains(err.Error(), "required file agentsuite.json is missing") {
 		t.Fatalf("invalid suite error = %v, want missing suite manifest validation failure", err)
 	}

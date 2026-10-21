@@ -174,6 +174,7 @@ func TestFlowCreateRefusesBeforeDestinationWrites(t *testing.T) {
 				writeFile(t, opt.MembersFile, strings.Replace(string(readFile(t, opt.MembersFile)), "writer.md", "../writer.md", 1))
 			case "symlink":
 				if err := os.Symlink("writer.md", filepath.Join(filepath.Dir(opt.MembersFile), "alias.md")); err != nil {
+					symlinkUnavailable(t, err)
 					t.Skip(err)
 				}
 				writeFile(t, opt.MembersFile, strings.Replace(string(readFile(t, opt.MembersFile)), "writer.md", "alias.md", 1))
@@ -256,7 +257,7 @@ func TestFlowNativeClosureAndDefaultPackingRefusals(t *testing.T) {
 			} else {
 				files["metadata/kmx/native-multi.json"] = []byte(strings.Replace(string(files["metadata/kmx/native-multi.json"]), "kmx.native-multi/v2", "changed", 1))
 			}
-			source := t.TempDir()
+			source := emptySourceDir(t)
 			for name, b := range files {
 				writeFile(t, filepath.Join(source, name), string(b))
 			}
@@ -395,6 +396,7 @@ func TestFlowCreateWithSymlinkedSystemTemp(t *testing.T) {
 	}
 	alias := filepath.Join(base, "alias")
 	if err := os.Symlink(real, alias); err != nil {
+		symlinkUnavailable(t, err)
 		t.Skip(err)
 	}
 	t.Setenv("TMPDIR", alias)

@@ -130,10 +130,27 @@ only the live and clone-free operation steps use documentation-only guards.
 Formatting checks must test `gofmt` output because
 `gofmt -l` alone exits successfully even when it lists files.
 
-Tests that read or write KMX state must set `KMX_HOME` to `t.TempDir()`. Do not
-use `XDG_CONFIG_HOME` as the test boundary: Go uses it for the native Linux
-config location, while macOS uses `~/Library/Application Support`. `KMX_HOME`
-is the repository's explicit cross-platform isolation contract.
+Tests that read or write KMX state must isolate `KMX_HOME`. Unix fixtures use
+`t.TempDir()`; Windows fixtures create a new protected user-only child with
+`fileaccess.PrivateTempDir(t.TempDir(), "state-")`, rather than weakening the
+production ACL check to accept inherited temp permissions. Do not use
+`XDG_CONFIG_HOME` as the test boundary: Linux uses it, macOS uses
+`~/Library/Application Support`, and native Windows uses `%LOCALAPPDATA%\\kmx`.
+`KMX_HOME` remains the explicit cross-platform override. Linux Windows-drive
+state/cache/output refusal is separate from read-only Windows inputs; see
+[Windows and WSL storage isolation](windows.md#native-windows-and-wsl-must-not-share-writable-state).
+
+The native Windows CI job uses `scripts/ci/windows-tests` to verify the original
+token-owner refusal and, only when necessary, launch tests with a duplicated
+primary token whose child default owner is its user. The launcher is
+[`main_windows.go`](../scripts/ci/windows-tests/main_windows.go), with native
+contract tests in [`main_windows_test.go`](../scripts/ci/windows-tests/main_windows_test.go).
+It never changes the
+runner's token, privileges, accounts or machine policy; product kmx only queries
+token ownership. Tests fail if the isolated context cannot be established. The
+ordinary-user native path and cross-compiled arm64 checks are distinct from a
+real elevated/Server execution claim. Keep native tests hermetic: no user WSL,
+Docker, cluster or model download is a prerequisite for offline storage checks.
 
 ```bash
 formatted=$(gofmt -l cmd internal pkg embed.go embed_test.go) && test -z "$formatted" && go vet ./... && go build ./... && go test ./...

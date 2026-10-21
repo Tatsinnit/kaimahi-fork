@@ -19,7 +19,7 @@ func TestReleaseLiftProvenanceCreatesOnly(t *testing.T) {
 	for _, absent := range []string{"", "Provider", "Agent", "both"} {
 		t.Run(absent, func(t *testing.T) {
 			a, _, opt, dir := releaseApplyFixture(t, absent)
-			home := t.TempDir()
+			home := privateSuiteDir(t)
 			t.Setenv("KMX_HOME", home)
 			a.now = func() time.Time { return time.Date(2026, 10, 16, 3, 4, 5, 0, time.FixedZone("test", 3600)) }
 			p, err := a.PrepareReleaseLift(t.Context(), opt)
@@ -110,7 +110,7 @@ func TestReleaseLiftProvenanceUnsafeStateBeforeEffects(t *testing.T) {
 
 func TestReleaseLiftProvenanceReadbackTampering(t *testing.T) {
 	a, _, opt, dir := releaseApplyFixture(t, "both")
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	p, err := a.PrepareReleaseLift(t.Context(), opt)
 	if err != nil {
 		t.Fatal(err)

@@ -135,7 +135,8 @@ func TestAnonymousRegistryRejectsInjectedAuthorization(t *testing.T) {
 	if delivered.Load() != 0 {
 		t.Errorf("remote received %d injected credential requests", delivered.Load())
 	}
-	if _, err := body.Stat(); !errors.Is(err, os.ErrClosed) {
+	// Stat of a closed file is not ErrClosed on Windows; Seek is on every platform.
+	if _, err := body.Seek(0, io.SeekStart); !errors.Is(err, os.ErrClosed) {
 		t.Errorf("refused request body was not closed: %v", err)
 	}
 }

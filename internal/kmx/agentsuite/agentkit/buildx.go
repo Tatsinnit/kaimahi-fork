@@ -65,13 +65,13 @@ func (e buildxExporter) ExportOCI(ctx context.Context, image agentImage, dst io.
 		}
 		return result, fmt.Errorf("Docker with the buildx plugin is required: %w\n%s", err, diagnostics.detail())
 	}
-	workDir, err := os.MkdirTemp("", "kmx-agentkit-build-*")
+	workDir, err := createBuildxWorkDir()
 	if err != nil {
 		return result, fmt.Errorf("create AgentKit build directory: %w", err)
 	}
 	defer os.RemoveAll(workDir)
 	agentkitFile := filepath.Join(workDir, "agentkitfile.yaml")
-	if err := os.WriteFile(agentkitFile, image.AgentkitFile, 0o600); err != nil {
+	if err := writeBuildxInput(agentkitFile, image.AgentkitFile); err != nil {
 		return result, fmt.Errorf("write AgentKit build input: %w", err)
 	}
 	progressMode := "quiet"
@@ -234,7 +234,7 @@ func (localBuildxRunner) Run(
 ) error {
 	command := exec.CommandContext(ctx, name, args...)
 	command.Cancel = func() error {
-		return command.Process.Signal(os.Interrupt)
+		return cancelBuildxProcess(command.Process)
 	}
 	command.WaitDelay = 10 * time.Second
 	command.Stdout = stdout

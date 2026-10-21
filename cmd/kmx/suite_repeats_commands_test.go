@@ -17,7 +17,7 @@ func TestSuiteRepeatPolicyBeforeConfiguration(t *testing.T) {
 		loads  int
 	}{{"runs: 3\nminPasses: 2\n", 1}, {"runs: 3\nminPasses: 4\n", 0}, {"runs: null\n", 0}} {
 		t.Run(tc.policy, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			root, outfile := suiteEvalSource(t)
 			if err := os.WriteFile(filepath.Join(root, "eval/example.yaml"), []byte("id: first\ninput: question\nexpectContains: [answer]\n"+tc.policy), 0600); err != nil {
 				t.Fatal(err)

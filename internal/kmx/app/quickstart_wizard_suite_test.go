@@ -81,7 +81,7 @@ func TestQuickstartWizardSuiteAuthorsOnlyPrivateSource(t *testing.T) {
 			f := newOrkaFixture(t, nil)
 			// Darwin's system temporary path can contain a symlink. Select its
 			// physical directory without weakening the production ancestry guard.
-			home, err := filepath.EvalSymlinks(t.TempDir())
+			home, err := filepath.EvalSymlinks(privateSuiteDir(t))
 			if err != nil {
 				t.Fatal(err)
 			}

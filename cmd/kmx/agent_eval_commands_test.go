@@ -61,7 +61,7 @@ func TestRootEvalOutputSelectionBeforeConfiguration(t *testing.T) {
 	}
 	for _, format := range []string{"text", "json"} {
 		t.Run(format, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			root, _ := suiteEvalSource(t)
 			var out, diagnostics bytes.Buffer
 			deps, loads := testDependencies(&out, &diagnostics)
@@ -76,7 +76,7 @@ func TestRootEvalOutputSelectionBeforeConfiguration(t *testing.T) {
 }
 
 func TestRootEvalJSONRefusalIsOneSafeDocument(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	root, _ := suiteEvalSource(t)
 	var out, diagnostics bytes.Buffer
 	deps, loads := testDependencies(&out, &diagnostics)

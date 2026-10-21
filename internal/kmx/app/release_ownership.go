@@ -38,14 +38,14 @@ func readReleaseOwnership(ctx context.Context, id string) (*releaseOwnershipReco
 	}
 	dir, err := config.StateDir()
 	if err != nil {
-		return nil, errReleaseUpdateUnsupported
+		return nil, filesystemBoundaryError(errReleaseUpdateUnsupported, err)
 	}
 	root, _, info, err := openSessionReferenceDirectory(filepath.Join(dir, "release-lifts", id, "snapshot"))
 	if err != nil {
 		return nil, errReleaseUpdateUnsupported
 	}
 	defer root.Close()
-	if info.Mode().Perm()&0077 != 0 {
+	if !privateDirOK(root, info) {
 		return nil, errReleaseUpdateUnsupported
 	}
 	for _, name := range []string{releaseCommitMarker, "4.json", "3.json", "2.json", "1.json"} {
@@ -97,22 +97,23 @@ func readReleaseOwnership(ctx context.Context, id string) (*releaseOwnershipReco
 // need not retain hard-link identity, but must retain exactly the same bytes.
 func readReleaseOwnershipSnapshot(root *os.Root, name string) ([]byte, error) {
 	info, err := root.Lstat(name)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > maxReleaseLiftRecordBytes {
+	if err != nil || !info.Mode().IsRegular() || !privateEntryOK(root, name, info) || info.Size() > maxReleaseLiftRecordBytes {
 		return nil, errReleaseState
 	}
-	file, err := root.Open(name)
+	file, err := openRootEntry(root, name)
 	if err != nil {
 		return nil, errReleaseState
 	}
 	opened, openErr := file.Stat()
-	if openErr != nil || !os.SameFile(info, opened) {
+	if openErr != nil || !os.SameFile(info, opened) || !privateHandleOK(file) {
 		file.Close()
 		return nil, errReleaseState
 	}
 	raw, readErr := io.ReadAll(io.LimitReader(file, maxReleaseLiftRecordBytes+1))
+	stillPrivate := privateHandleOK(file)
 	closeErr := file.Close()
 	after, afterErr := root.Lstat(name)
-	if readErr != nil || closeErr != nil || afterErr != nil || !os.SameFile(info, after) || len(raw) > maxReleaseLiftRecordBytes {
+	if readErr != nil || closeErr != nil || !stillPrivate || afterErr != nil || !os.SameFile(info, after) || len(raw) > maxReleaseLiftRecordBytes {
 		return nil, errReleaseState
 	}
 	return raw, nil

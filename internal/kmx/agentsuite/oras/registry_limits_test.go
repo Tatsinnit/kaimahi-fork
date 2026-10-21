@@ -62,7 +62,7 @@ func oversizedRegistryIndexFixture(t *testing.T, api bool) (string, string, *tes
 		registry.ServeHTTP(w, r)
 	}))
 	t.Cleanup(server.Close)
-	source := filepath.Join(t.TempDir(), "source")
+	source := privateFixtureDir(t, filepath.Join(t.TempDir(), "source"))
 	copyDirectory(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), source)
 	return source, strings.TrimPrefix(server.URL, "http://") + "/team/suite:v1", registry, &oversized, &indexReads
 }
@@ -195,7 +195,7 @@ func TestRegistryPushReferrerIndexGrowthPreservesExistingIndex(t *testing.T) {
 				registry.ServeHTTP(w, r)
 			}))
 			defer server.Close()
-			source := filepath.Join(t.TempDir(), "source")
+			source := privateFixtureDir(t, filepath.Join(t.TempDir(), "source"))
 			copyDirectory(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), source)
 			reference := strings.TrimPrefix(server.URL, "http://") + "/team/suite:v1"
 			previous, err := PushRegistry(context.Background(), source, reference, true, false, PushOptions{})
@@ -327,7 +327,8 @@ func TestRegistryIndexWriteSizeBoundary(t *testing.T) {
 					if err == nil || !strings.Contains(err.Error(), "registry index size 1048577 exceeds 1048576 bytes") || requests.Load() != 0 {
 						t.Errorf("index overflow: requests=%d error=%v, want size refusal before sending", requests.Load(), err)
 					}
-					if _, err := body.Stat(); !errors.Is(err, os.ErrClosed) {
+					// Stat of a closed file is not ErrClosed on Windows; Seek is on every platform.
+					if _, err := body.Seek(0, io.SeekStart); !errors.Is(err, os.ErrClosed) {
 						t.Errorf("refused request body was not closed: %v", err)
 					}
 				} else if err != nil || requests.Load() != 1 || resp == nil || resp.StatusCode != http.StatusCreated {

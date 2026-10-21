@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 
 	agentsuite "github.com/agent-primitives/suite"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2/content"
-	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry"
 )
 
@@ -21,7 +21,10 @@ func PushLayout(ctx context.Context, source, destination, reference string, expe
 	if reference == "" {
 		return PushResult{}, errors.New("AgentSuite push reference is required")
 	}
-	store, descriptor, report, err := preparedLayout(source, expected)
+	if err := fileaccess.RefuseWindowsDriveMount(destination); err != nil {
+		return PushResult{}, err
+	}
+	store, descriptor, report, err := preparedLayout(ctx, source, expected)
 	if err != nil {
 		return PushResult{}, err
 	}
@@ -44,6 +47,9 @@ func PushLayout(ctx context.Context, source, destination, reference string, expe
 	if pathWithin(sourcePath, filepath.Join(parent, filepath.Base(destinationPath))) {
 		return PushResult{}, errors.New("AgentSuite target must be outside the prepared source layout")
 	}
+	if within, err := physicalWithin(sourcePath, destinationPath); err != nil || within {
+		return PushResult{}, errors.Join(errors.New("AgentSuite target must be outside the prepared source layout"), err)
+	}
 	release, err := lockLayoutPublication(ctx, destinationPath)
 	if err != nil {
 		return PushResult{}, err
@@ -53,7 +59,7 @@ func PushLayout(ctx context.Context, source, destination, reference string, expe
 	updated := false
 	info, err := os.Lstat(destinationPath)
 	if errors.Is(err, os.ErrNotExist) {
-		targetPath, err = os.MkdirTemp(parent, ".agentsuite-publish-*")
+		targetPath, err = fileaccess.PrivateTempDir(parent, ".agentsuite-publish-*")
 		if err != nil {
 			return PushResult{}, err
 		}
@@ -66,17 +72,23 @@ func PushLayout(ctx context.Context, source, destination, reference string, expe
 		if err := requireOCILayout(destinationPath, "AgentSuite target"); err != nil {
 			return PushResult{}, err
 		}
+		if err := checkExistingLayout(destinationPath); err != nil {
+			return PushResult{}, fmt.Errorf("check AgentSuite OCI target: %w", err)
+		}
 		updated = true
 	}
-	target, err := oci.New(targetPath)
+	target, err := newPrivateStore(targetPath)
 	if err != nil {
 		return PushResult{}, err
 	}
 	if _, err := NewPusher(target).Push(ctx, store, descriptor, reference); err != nil {
 		return PushResult{}, err
 	}
+	if err := verifyPrivateTree(targetPath); err != nil {
+		return PushResult{}, fmt.Errorf("check AgentSuite OCI target: %w", err)
+	}
 	if !updated {
-		if err := os.Rename(targetPath, destinationPath); err != nil {
+		if err := publishDirectory(targetPath, destinationPath); err != nil {
 			return PushResult{}, fmt.Errorf("publish AgentSuite target: %w", err)
 		}
 	}
@@ -93,7 +105,7 @@ func PushLayoutRegistry(ctx context.Context, source, reference string, plainHTTP
 	if err := parsed.ValidateReferenceAsTag(); err != nil {
 		return PushResult{}, fmt.Errorf("AgentSuite registry push requires a tag: %w", err)
 	}
-	store, descriptor, report, err := preparedLayout(source, expected)
+	store, descriptor, report, err := preparedLayout(ctx, source, expected)
 	if err != nil {
 		return PushResult{}, err
 	}
@@ -105,7 +117,7 @@ func PushLayoutRegistry(ctx context.Context, source, reference string, plainHTTP
 	return pushRegistryGraph(ctx, store, repository, tag, force, options, result)
 }
 
-func preparedLayout(source string, expected ocispec.Descriptor) (*oci.Store, ocispec.Descriptor, *agentsuite.Report, error) {
+func preparedLayout(ctx context.Context, source string, expected ocispec.Descriptor) (*layoutSourceStore, ocispec.Descriptor, *agentsuite.Report, error) {
 	report, err := agentsuite.ValidatePath(source)
 	if err != nil {
 		return nil, ocispec.Descriptor{}, nil, fmt.Errorf("validate prepared AgentSuite: %w", err)
@@ -121,7 +133,8 @@ func preparedLayout(source string, expected ocispec.Descriptor) (*oci.Store, oci
 	if !content.Equal(index.Manifests[0], expected) {
 		return nil, ocispec.Descriptor{}, nil, errors.New("prepared AgentSuite descriptor differs from the selected suite")
 	}
-	store, err := oci.New(source)
+	// Windows opens an immutable source; Unix retains its original store setup.
+	store, err := openLayoutSource(ctx, source)
 	if err != nil {
 		return nil, ocispec.Descriptor{}, nil, err
 	}

@@ -257,16 +257,10 @@ func TestSuiteDiffRejectsViewWithJSON(t *testing.T) {
 
 func TestSuiteDiffSanitizesArtifactErrors(t *testing.T) {
 	fixture := copySuiteFixture(t, filepath.Join("..", "..", "testdata", "agentsuite", "minimal"))
-	unsafePath := filepath.Join(fixture, "bad\x1b[31m\nname")
-	if err := os.WriteFile(unsafePath, []byte("unsafe"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(unsafePath, 0o666); err != nil {
-		t.Fatal(err)
-	}
+	input := unsafeSuiteDiffInput(t, fixture)
 	var out, diagnostics bytes.Buffer
 	deps, _ := testDependencies(&out, &diagnostics)
-	err := execute([]string{"suite", "diff", fixture, fixture}, deps)
+	err := execute([]string{"suite", "diff", input, fixture}, deps)
 	if err == nil {
 		t.Fatal("suite diff succeeded with an unsafe supplemental file")
 	}
@@ -276,6 +270,10 @@ func TestSuiteDiffSanitizesArtifactErrors(t *testing.T) {
 	var diagnostic *suiteDiagnosticError
 	if !errors.As(err, &diagnostic) {
 		t.Fatalf("error type = %T, want *suiteDiagnosticError", err)
+	}
+	// The unsanitized cause must carry the controls the boundary removed.
+	if !strings.ContainsAny(diagnostic.cause.Error(), "\x1b\n") {
+		t.Fatalf("unsafe input did not reach the artifact error: %q", diagnostic.cause)
 	}
 }
 
@@ -631,7 +629,7 @@ func assertDirectoryContentsEqual(t *testing.T, wantRoot, gotRoot string) {
 
 func copySuiteFixture(t *testing.T, source string) string {
 	t.Helper()
-	destination := t.TempDir()
+	destination := suiteInputDir(t)
 	if err := filepath.WalkDir(source, func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr

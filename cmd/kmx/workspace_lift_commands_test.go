@@ -25,7 +25,7 @@ targets:
 func TestWorkspaceLiftSelectsNamedDestinationBeforeConfig(t *testing.T) {
 	for _, mode := range []string{"default", "explicit context", "changed config"} {
 		t.Run(mode, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			root, _ := suiteEvalSource(t)
 			t.Chdir(root)
 			path := filepath.Join(root, "kmx.yaml")
@@ -67,7 +67,7 @@ func TestWorkspaceLiftSelectsNamedDestinationBeforeConfig(t *testing.T) {
 func TestWorkspaceLiftRejectsIncompleteOrUnsupportedPlanOffline(t *testing.T) {
 	for _, scenario := range []string{"no to", "no config", "no evaluationTarget", "no repository", "kagent", "missing inference", "evidence", "from-layout", "bindings", "explicit empty", "extra argument"} {
 		t.Run(scenario, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			root, _ := suiteEvalSource(t)
 			t.Chdir(root)
 			raw := composedDestinationConfig
@@ -155,7 +155,7 @@ func TestWorkspaceLiftConcreteSelectionIsFrozenAndOverridesDestinationOnly(t *te
 func TestWorkspaceLiftColdPlanNeedsNoOperationalConfigOrProof(t *testing.T) {
 	for _, jsonOutput := range []bool{false, true} {
 		t.Run(map[bool]string{false: "text", true: "json"}[jsonOutput], func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			root, _ := suiteEvalSource(t)
 			t.Chdir(root)
 			if err := os.WriteFile(filepath.Join(root, "kmx.yaml"), []byte(composedDestinationConfig), 0600); err != nil {

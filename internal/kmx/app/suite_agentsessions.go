@@ -38,8 +38,8 @@ func snapshotSuiteSessionsHost(path string, suite *workspace.NativeSuite) (*suit
 	}
 	// The shared no-follow bounded reader anchors both file and directory identity;
 	// enforce private permissions before accepting operator declarations.
-	raw, parent, file, err := readSuiteKagentBindings(path)
-	if err != nil || parent.Mode().Perm()&0077 != 0 || file.Mode().Perm()&0077 != 0 || len(raw) > 16<<10 {
+	raw, parent, file, err := readPrivateSuiteSessionsHost(path)
+	if err != nil || len(raw) > 16<<10 {
 		return nil, errSuiteSessionsHost
 	}
 	var host suiteSessionsHostFile

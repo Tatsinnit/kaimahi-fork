@@ -26,7 +26,7 @@ import (
 
 func TestSuiteSessionsCLIExplicitDevelopmentAndNoClusterConfiguration(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)

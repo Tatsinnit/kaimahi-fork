@@ -23,7 +23,7 @@ func TestSuiteEvaluatedFilePushContract(t *testing.T) {
 	a := &App{Out: io.Discard}
 	for _, change := range []string{"malformed before prepare", "incoherent before transfer", "other S", "case changed", "equivalent source spelling", "equivalent case spelling", "passing"} {
 		t.Run(change, func(t *testing.T) {
-			state := t.TempDir()
+			state := privateSuiteDir(t)
 			t.Setenv("KMX_HOME", state)
 			file := filepath.Join(privateSuiteDir(t), "receipt.json")
 			raw := canonical

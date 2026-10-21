@@ -91,7 +91,7 @@ func TestPushRejectsNestedTargetThroughSymlinks(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
-			realSource := filepath.Join(root, "suite")
+			realSource := privateFixtureDir(t, filepath.Join(root, "suite"))
 			copyDirectory(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"), realSource)
 			link := filepath.Join(root, "suite-link")
 			source := test.source(t, realSource, link)
@@ -107,7 +107,7 @@ func TestPushRejectsNestedTargetThroughSymlinks(t *testing.T) {
 }
 
 func TestPushAddsReferencesToExistingLayout(t *testing.T) {
-	source := filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal")
+	source := fixtureSource(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"))
 	target := filepath.Join(t.TempDir(), "layout")
 	references := []string{"agentsuites/alpha:v1", "agentsuites/beta:v1"}
 	var first ocispec.Descriptor
@@ -169,7 +169,7 @@ func TestPushFailureLeavesNoNewTarget(t *testing.T) {
 }
 
 func TestPushRefusesArbitraryExistingDirectory(t *testing.T) {
-	source := filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal")
+	source := fixtureSource(t, filepath.Join("..", "..", "..", "..", "testdata", "agentsuite", "minimal"))
 	target := t.TempDir()
 	keep := filepath.Join(target, "keep")
 	if err := os.WriteFile(keep, []byte("keep"), 0o644); err != nil {
@@ -207,7 +207,7 @@ func mustWrite(t *testing.T, root, name string, data []byte, mode os.FileMode) {
 func mustSymlink(t *testing.T, oldname, newname string) {
 	t.Helper()
 	if err := os.Symlink(oldname, newname); err != nil {
-		if errors.Is(err, os.ErrPermission) {
+		if errors.Is(err, os.ErrPermission) || symlinkPrivilegeMissing(err) {
 			t.Skipf("symlinks unavailable: %v", err)
 		}
 		t.Fatal(err)

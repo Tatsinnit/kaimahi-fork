@@ -3,16 +3,39 @@ package run
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
 func TestRunnerContextCancelsActiveCommand(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // No Unix coreutils or WSL prerequisite.
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := filepath.Join(t.TempDir(), "ready")
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &Runner{Context: ctx}
 	done := make(chan error, 1)
-	go func() { done <- r.Run("sleep", "30") }()
-	time.Sleep(30 * time.Millisecond)
+	go func() {
+		done <- r.Run(executable, "-test.run=^TestRunnerCancellationHelper$", "--", "--runner-ready", ready)
+	}()
+	t.Cleanup(cancel)
+	deadline := time.After(5 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("owned child exited before readiness: %v", err)
+		case <-deadline:
+			t.Fatal("owned child did not become ready")
+		case <-time.After(time.Millisecond):
+		}
+	}
 	cancel()
 	select {
 	case err := <-done:
@@ -22,6 +45,17 @@ func TestRunnerContextCancelsActiveCommand(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("cancelled command remained active")
 	}
+}
+
+func TestRunnerCancellationHelper(t *testing.T) {
+	args := os.Args
+	if len(args) < 2 || args[len(args)-2] != "--runner-ready" {
+		return
+	}
+	if err := os.WriteFile(args[len(args)-1], []byte("ready"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Minute)
 }
 
 // Poll is bounded by ATTEMPTS, not by wall-clock — the shell's

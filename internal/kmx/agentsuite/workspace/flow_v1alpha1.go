@@ -12,6 +12,7 @@ import (
 	agentsuite "github.com/agent-primitives/suite"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/localartifact"
 	suiteoras "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/oras"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/scaffold"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.yaml.in/yaml/v3"
@@ -94,7 +95,7 @@ func validateFlowFiles(ctx context.Context, files map[string][]byte) (*agentsuit
 	if err := nativeBoundsMode(files, true); err != nil {
 		return nil, err
 	}
-	stage, err := os.MkdirTemp("", "kmx-flow-validation-*")
+	stage, err := fileaccess.PrivateTempDir("", "kmx-flow-validation-*")
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +124,7 @@ func readPreparedFlow(ctx context.Context, p *Prepared) (*localartifact.Artifact
 	if err := privateTree(root, false); err != nil {
 		return nil, err
 	}
-	r, err := os.OpenRoot(root)
+	r, err := openPrivateRoot(root)
 	if err != nil {
 		return nil, err
 	}
@@ -209,6 +210,9 @@ type flowMemberInput struct {
 // Every input and the regenerated public graph is checked before destination writes.
 func CreateFlow(ctx context.Context, root string, opt FlowCreateOptions) error {
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := fileaccess.RefuseWindowsDriveMount(root); err != nil {
 		return err
 	}
 	if err := safeText(opt.Name); err != nil {
@@ -310,11 +314,7 @@ func CreateFlow(ctx context.Context, root string, opt FlowCreateOptions) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := filepath.EvalSymlinks(os.TempDir())
-	if err != nil {
-		return err
-	}
-	stage, err := os.MkdirTemp(tmp, "kmx-flow-create-*")
+	stage, err := flowCreateStage()
 	if err != nil {
 		return err
 	}

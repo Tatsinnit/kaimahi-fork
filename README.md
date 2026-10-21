@@ -35,8 +35,10 @@ These docs follow main. `kmx test` and `kmx deploy` are unreleased; v0.8.1 uses
 ## Try it locally
 
 Have Docker running and Homebrew installed. For Podman, [select it explicitly](docs/getting-started.md#using-podman-instead-of-docker).
-On Windows, use Windows Subsystem for Linux (WSL); native Windows builds are not
-supported yet.
+Stable releases through v0.8.1 require WSL on Windows. Native Windows work is
+unreleased; see the [Windows guide](docs/windows.md) for its storage boundaries,
+verification and day-0 scope. Do not treat planned plugin or local-preview work
+as shipped.
 
 ```sh
 brew install kaimahi-agents/tap/kmx

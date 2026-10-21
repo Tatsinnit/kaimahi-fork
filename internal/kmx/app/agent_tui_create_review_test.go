@@ -14,7 +14,7 @@ import (
 )
 
 func TestAgentTUICreationRetainsDiscoveredServerWithoutReload(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	dir := t.TempDir()
 	fakeTool(t, dir, "kubectl", `case "$*" in
  *'config view'*) printf '%s' '{"contexts":[{"name":"remote","context":{"cluster":"r"}}],"clusters":[{"name":"r","cluster":{"server":"https://reviewed.example.com"}}]}' ;;
@@ -39,7 +39,7 @@ esac`)
 }
 
 func TestAgentTUICreationSourceFirstReviewNoDeploy(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	opt := nativeEvaluationOptions(t)
 	m := newAgentTUIModel(AgentTUIOptions{Demo: true, Namespace: "agents"})
 	m.focus = 1
@@ -142,7 +142,7 @@ func TestAgentTUICreationReviewCancelAndStaleResult(t *testing.T) {
 }
 
 func TestAgentTUICreationRejectsDriftOnConfirmation(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	opt := nativeEvaluationOptions(t)
 	r, err := (&App{}).reviewSuiteWorkspace(t.Context(), opt.Workspace)
 	if err != nil {

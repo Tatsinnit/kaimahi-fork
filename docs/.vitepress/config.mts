@@ -89,6 +89,7 @@ const userGuides = [
   { text: 'AKS Create, Test, Deploy demo', link: '/docs/aks-demo' },
   { text: 'AKS', link: '/docs/aks' },
   { text: 'Releases and upgrades', link: '/docs/releases' },
+  { text: 'Windows', link: '/docs/windows' },
   { text: 'FAQ', link: '/docs/FAQ' }
 ]
 

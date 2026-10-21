@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/workspace"
@@ -64,9 +66,18 @@ func TestPrivateTempDirReturnsCanonicalPrivatePath(t *testing.T) {
 	}
 	alias := filepath.Join(base, "alias")
 	if err := os.Symlink(target, alias); err != nil {
+		// ERROR_PRIVILEGE_NOT_HELD: this Windows token cannot create
+		// symbolic links, so the alias this test canonicalizes cannot exist.
+		if runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(1314)) {
+			t.Skipf("symbolic link creation needs SeCreateSymbolicLinkPrivilege: %v", err)
+		}
 		t.Fatal(err)
 	}
 	t.Setenv("TMPDIR", alias)
+	if runtime.GOOS == "windows" {
+		// os.TempDir reads TMP, not TMPDIR, on Windows.
+		t.Setenv("TMP", alias)
+	}
 
 	got := privateTempDir(t)
 	canonicalTarget, err := filepath.EvalSymlinks(target)
@@ -87,7 +98,9 @@ func TestPrivateTempDirReturnsCanonicalPrivatePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotMode := info.Mode().Perm(); gotMode != 0700 {
+	// Windows has no POSIX permission bits; os.Chmod there only toggles the
+	// read-only attribute, so the mode assertion is Unix-only.
+	if gotMode := info.Mode().Perm(); runtime.GOOS != "windows" && gotMode != 0700 {
 		t.Fatalf("private temp directory mode = %#o, want 0700", gotMode)
 	}
 }
@@ -95,7 +108,7 @@ func TestPrivateTempDirReturnsCanonicalPrivatePath(t *testing.T) {
 func TestSuiteEvalOfflineBeforeConfiguration(t *testing.T) {
 	for _, stage := range []string{"valid", "managed", "unsupported", "budget", "output", "selector", "empty workspace", "global context", "positional", "no workspace", "private source", "private descriptor", "bare"} {
 		t.Run(stage, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			root, outfile := suiteEvalSource(t)
 			nested := filepath.Join(root, "nested")
 			if err := os.Mkdir(nested, 0700); err != nil {
@@ -197,7 +210,7 @@ func TestSuiteEvalOfflineBeforeConfiguration(t *testing.T) {
 }
 
 func TestSuiteEvalConfiguredTargetAndRetryIdentity(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	root, outfile := suiteEvalSource(t)
 	outfile = filepath.Join(filepath.Dir(outfile), "owner's passing.json")
 	var out, diagnostics bytes.Buffer
@@ -252,7 +265,7 @@ func suiteKagentCLIArgs(t *testing.T, extension string) ([]string, string, strin
 func TestSuiteKagentEvalOfflineConfigurationBoundary(t *testing.T) {
 	for _, extension := range []string{".yaml", ".yml"} {
 		t.Run(extension, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			args, _, _ := suiteKagentCLIArgs(t, extension)
 			var out, diagnostics bytes.Buffer
 			deps, loads := testDependencies(&out, &diagnostics)
@@ -288,7 +301,7 @@ func TestSuiteKagentEvalRefusesBeforeConfiguration(t *testing.T) {
 		{"judge assertion", "llmJudge assertions require --judge-base-url"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			args, root, binding := suiteKagentCLIArgs(t, ".yml")
 			switch tc.name {
 			case "both selectors":
@@ -355,7 +368,7 @@ func TestSuiteEvalHelpersHelpAndCompletionRemainOffline(t *testing.T) {
 }
 
 func TestRootPushEvaluationRoutesToPrivateFileConsumer(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	root, _ := suiteEvalSource(t)
 	for _, stage := range []string{"malformed", "empty", "extracted"} {
 		t.Run(stage, func(t *testing.T) {

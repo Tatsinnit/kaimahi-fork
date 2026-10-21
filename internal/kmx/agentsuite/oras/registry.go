@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	kmxsuite "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	oraslib "oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/errdef"
@@ -130,6 +131,9 @@ func PullRegistry(
 	output string,
 	plainHTTP bool,
 ) (PullResult, error) {
+	if err := fileaccess.RefuseWindowsDriveMount(output); err != nil {
+		return PullResult{}, err
+	}
 	repository, targetReference, err := newRegistryRepository(reference, plainHTTP, nil)
 	if err != nil {
 		return PullResult{}, err

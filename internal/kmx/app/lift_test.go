@@ -295,7 +295,7 @@ func TestTheOpinionatedDefaultsAreTheOnesTheGuideExplains(t *testing.T) {
 // A resumed lift must not adopt a record written for the other branch: the
 // two have opposite rules about deleting a resource group.
 func TestTheRecordPathIsStablePerClusterAndSafeAsAFilename(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	a, err := liftRecordPath("My_Group (test)", "kaimahi-demo")
 	if err != nil {
 		t.Fatal(err)
@@ -327,10 +327,7 @@ func TestTheCarriedScriptsGetTheLayoutTheyExpect(t *testing.T) {
 	defer cleanup()
 
 	for _, name := range []string{"aks-up.sh", "aks-down.sh", "kube-guard.sh"} {
-		info, err := os.Stat(filepath.Join(dir, "scripts", name))
-		if err != nil || info.Mode().Perm()&0o100 == 0 {
-			t.Errorf("carried script %s is missing or not executable: %v", name, err)
-		}
+		requireCarriedScriptForTest(t, filepath.Join(dir, "scripts", name))
 	}
 	cleanup()
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {

@@ -23,7 +23,7 @@ func TestReleaseLiftProvenanceRejectsStrippedMetadata(t *testing.T) {
 				} else {
 					a, opt, _, _ = releaseKagentFixture(t)
 				}
-				t.Setenv("KMX_HOME", t.TempDir())
+				t.Setenv("KMX_HOME", privateSuiteDir(t))
 				p, err := a.PrepareReleaseLift(t.Context(), opt)
 				if err != nil {
 					t.Fatal(err)
@@ -72,7 +72,7 @@ func TestReleaseLiftProvenanceRejectsStrippedMetadata(t *testing.T) {
 
 func TestReleaseLiftProvenanceCheckpointFailureStopsNextCreate(t *testing.T) {
 	a, _, opt, dir := releaseApplyFixture(t, "both")
-	home := t.TempDir()
+	home := privateSuiteDir(t)
 	t.Setenv("KMX_HOME", home)
 	p, err := a.PrepareReleaseLift(t.Context(), opt)
 	if err != nil {

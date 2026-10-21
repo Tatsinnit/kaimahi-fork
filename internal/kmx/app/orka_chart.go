@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 )
 
@@ -234,22 +233,11 @@ func (a *App) applyOrkaChart(chart []byte) error {
 	if err != nil {
 		return err
 	}
-	file, err := os.CreateTemp("", "kmx-orka-*.tgz")
+	chartPath, cleanup, err := writeOrkaChartTemp(chart)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(file.Name())
-	if err := file.Chmod(0o600); err != nil {
-		file.Close()
-		return err
-	}
-	if _, err := file.Write(chart); err != nil {
-		file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
+	defer cleanup()
 	quiet := *a.Run
 	quiet.Echo = false
 	fmt.Fprintf(a.Err, "kubectl --context %s apply -f - # (%d CRDs from verified Orka chart)\n", a.Cfg.KubeContext, count)
@@ -263,7 +251,7 @@ func (a *App) applyOrkaChart(chart []byte) error {
 	// an appropriate place to expose generated Secret values in kmx logs.
 	quiet.Stdout, quiet.Stderr = io.Discard, io.Discard
 	fmt.Fprintf(a.Err, "helm install orka <verified chart> -n %s --kube-context %s --wait # (harness-v2)\n", OrkaNamespace, a.Cfg.KubeContext)
-	if err := quiet.Run("helm", "install", orkaRelease, file.Name(), "-n", OrkaNamespace,
+	if err := quiet.Run("helm", "install", orkaRelease, chartPath, "-n", OrkaNamespace,
 		"--kube-context", a.Cfg.KubeContext, "--create-namespace", "--wait", "--timeout", "10m",
 		"--set", "controller.mode=harness-v2", "--set", "fullnameOverride=orka-api",
 		"--set-string", "labels.kmx\\.kaimahi\\.dev/installed=true",

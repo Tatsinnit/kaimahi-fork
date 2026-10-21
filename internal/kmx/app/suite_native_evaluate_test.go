@@ -84,7 +84,7 @@ func nativeEvaluationOptions(t *testing.T) SuiteWorkspaceEvaluationOptions {
 
 func TestSuiteWorkspaceEvaluationOfflineRefusals(t *testing.T) {
 	// An unsupported evaluator must refuse before output anchoring/configuration.
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	opt := nativeEvaluationOptions(t)
 	opt.Out = filepath.Join(opt.Workspace, "forbidden.json")
 	writeFile(t, filepath.Join(opt.Workspace, "eval/example.yaml"), "id: first\ninput: private\nassertions: [{id: tool, type: toolCalled, tool: private}]\n")
@@ -100,7 +100,7 @@ func TestSuiteWorkspaceEvaluationOfflineRefusals(t *testing.T) {
 }
 
 func TestSuiteWorkspaceEvaluationNamesPlaceholderBeforeConfiguration(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	opt := nativeEvaluationOptions(t)
 	member := filepath.Join(opt.Workspace, "agents/greeter/member.yaml")
 	raw, err := os.ReadFile(member)
@@ -135,7 +135,7 @@ func TestCandidatePlaceholderBeforeEffectsNamesRemediation(t *testing.T) {
 }
 
 func TestAgentSessionsEvaluationRefusesBeforeOutputAndOrkaPreflight(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	opt := nativeEvaluationOptions(t)
 	member := filepath.Join(opt.Workspace, "agents/greeter/member.yaml")
 	data, err := os.ReadFile(member)

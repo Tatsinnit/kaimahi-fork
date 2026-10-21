@@ -89,7 +89,7 @@ func suiteOutputRegistryFromLayout(t *testing.T, layoutRoot string) *httptest.Se
 
 func TestSuiteRegistryPullPrintsPinForTagsOnly(t *testing.T) {
 	t.Setenv("DOCKER_CONFIG", t.TempDir())
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	server, digest := suiteOutputRegistry(t)
 	repository := strings.TrimPrefix(server.URL, "http://") + "/team/suite"
 	for _, test := range []struct {
@@ -128,7 +128,7 @@ func TestSuiteRegistryPullPrintsPinForTagsOnly(t *testing.T) {
 
 func TestSuiteRegistryPushPrintsDigestAndPassesForce(t *testing.T) {
 	t.Setenv("DOCKER_CONFIG", t.TempDir())
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	server, digest := suiteOutputRegistry(t)
 	reference := strings.TrimPrefix(server.URL, "http://") + "/team/suite:v1"
 	fixture := copySuiteFixture(t, filepath.Join("..", "..", "testdata", "agentsuite", "minimal"))
@@ -159,7 +159,7 @@ func TestSuiteRegistryPushPrintsDigestAndPassesForce(t *testing.T) {
 
 func TestSuiteRegistryProvenanceFailureHasSafeDiagnostics(t *testing.T) {
 	t.Setenv("DOCKER_CONFIG", t.TempDir())
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	seed, digest := suiteOutputRegistry(t)
 	upstream, err := url.Parse(seed.URL)
 	if err != nil {

@@ -92,11 +92,10 @@ func (a *App) runTaskWaitError(ctx context.Context, err error, name, contextName
 // readRunPromptFile opens a regular file without following a substituted link.
 // The size check applies to bytes actually read, even if the file grows.
 func readRunPromptFile(path string) (string, error) {
-	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	file, err := openRunPromptFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read prompt file (must be regular, not a link): %w", err)
 	}
-	file := os.NewFile(uintptr(fd), path)
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {

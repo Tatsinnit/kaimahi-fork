@@ -22,7 +22,7 @@ import (
 func TestWorkspacePushSavedExactHostHTTPAndExplicitFalse(t *testing.T) {
 	for _, mode := range []string{"saved", "explicit false", "other host", "layout"} {
 		t.Run(mode, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			root, _ := suiteEvalSource(t)
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); w.WriteHeader(http.StatusTeapot) }))
@@ -79,7 +79,7 @@ func TestOperationalConfigOnlyEditsPreserveSourceAndSuiteIdentity(t *testing.T) 
 func TestNamedEvaluationResolvedContextAndExplicitOverrides(t *testing.T) {
 	for _, name := range []string{"named", "evalTarget", "explicit overrides", "explicit context bypass", "missing target", "runtime mismatch", "changed config"} {
 		t.Run(name, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			root, outfile := suiteEvalSource(t)
 			t.Chdir(root)
 			raw := "version: 1\nevalTarget: dev\npublishRepository: registry.example/agents\ntargets:\n  dev: {context: kind-saved, namespace: agents, runtime: orka, inference: 'provider:saved'}\n"
@@ -143,7 +143,7 @@ func TestNamedEvaluationResolvedContextAndExplicitOverrides(t *testing.T) {
 func TestNamedKagentEvaluationUnionReplacementAndNoOrkaDefault(t *testing.T) {
 	for _, mode := range []string{"saved bindings", "replace inference", "explicit both", "namespace mismatch"} {
 		t.Run(mode, func(t *testing.T) {
-			t.Setenv("KMX_HOME", t.TempDir())
+			t.Setenv("KMX_HOME", privateTestStateDir(t))
 			base, root, binding := suiteKagentCLIArgs(t, ".yaml")
 			t.Chdir(root)
 			raw := "version: 1\ntargets:\n  dev: {context: kind-saved, runtime: kagent, bindings: '" + binding + "'}\n"

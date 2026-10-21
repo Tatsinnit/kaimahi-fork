@@ -396,7 +396,7 @@ func (a *App) patchReleaseUpdate(ctx context.Context, p *preparedReleaseUpdate, 
 	if dry {
 		args = append(args, "--dry-run=server")
 	}
-	raw, err := a.orkaCapture(ctx, body, args...)
+	raw, err := a.orkaPatchCapture(ctx, body, args...)
 	if err != nil {
 		return nil, suiteNativeOwnedResource{}, err
 	}

@@ -12,6 +12,7 @@ import (
 
 	kaimahi "github.com/kaimahi-agents/kaimahi"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/config"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/lift"
 )
 
@@ -308,7 +309,7 @@ func (a *App) liftCommand(opt lift.Options, down bool) string {
 // liftWorkspace materializes only provisioning scripts and their context
 // guard, preserving the relative layout expected by those scripts.
 func (a *App) liftWorkspace() (string, func(), error) {
-	dir, err := os.MkdirTemp("", "kmx-lift-")
+	dir, err := fileaccess.PrivateTempDir("", "kmx-lift-")
 	if err != nil {
 		return "", func() {}, fmt.Errorf("kmx aks: cannot create a working directory: %w", err)
 	}
@@ -322,10 +323,10 @@ func (a *App) liftWorkspace() (string, func(), error) {
 			return fmt.Errorf("kmx aks: %s is missing from this build: %w", name, err)
 		}
 		target := filepath.Join(dir, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		if err := fileaccess.EnsurePrivatePath(filepath.Dir(target)); err != nil {
 			return err
 		}
-		return os.WriteFile(target, body, mode)
+		return fileaccess.WritePrivateFile(target, body, mode)
 	}
 
 	for _, script := range []string{
@@ -412,7 +413,7 @@ func (a *App) openLiftRecord(opt lift.Options, subscription string) (*lift.Recor
 		return nil, nil, err
 	}
 	var record *lift.Record
-	if f, err := os.Open(path); err == nil {
+	if f, err := openLiftRecordFile(path); err == nil {
 		defer f.Close()
 		record, err = lift.ReadRecord(f)
 		if err != nil {
@@ -478,22 +479,10 @@ func (a *App) openLiftRecord(opt lift.Options, subscription string) (*lift.Recor
 	// record written only on success is a record of exactly the runs that did
 	// not need one.
 	save := func() error {
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		if err := fileaccess.EnsurePrivatePath(filepath.Dir(path)); err != nil {
 			return err
 		}
-		tmp, err := os.CreateTemp(filepath.Dir(path), ".record-*")
-		if err != nil {
-			return err
-		}
-		defer os.Remove(tmp.Name())
-		if err := record.Write(tmp); err != nil {
-			tmp.Close()
-			return err
-		}
-		if err := tmp.Close(); err != nil {
-			return err
-		}
-		return os.Rename(tmp.Name(), path)
+		return replaceLiftRecordFile(path, record)
 	}
 	return record, save, save()
 }

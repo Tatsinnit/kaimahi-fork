@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -21,7 +20,7 @@ func assertOrkaForwardExited(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := syscall.Kill(pid, 0); err != syscall.ESRCH {
+	if exited, err := processExitedForTest(pid); !exited {
 		t.Fatalf("forward process %d still exists: %v", pid, err)
 	}
 }

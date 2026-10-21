@@ -3,7 +3,8 @@ package scaffold
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 )
 
 // WriteNew writes the manifest with an EXCLUSIVE create.
@@ -13,12 +14,11 @@ import (
 // replace their work. There is no --force; the remedy is to name a different
 // file, or to delete the one you have decided you do not want.
 func WriteNew(path, content string) error {
-	if dir := filepath.Dir(path); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
+	// A Linux output on a Windows drive mount is refused before any write.
+	if err := fileaccess.RefuseWindowsDriveMount(path); err != nil {
+		return err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	f, err := createNew(path)
 	if err != nil {
 		if os.IsExist(err) {
 			return &fileExistsError{path: path, cause: err}

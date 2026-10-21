@@ -142,9 +142,19 @@ case "$6" in
 *) exit 92 ;;
 esac
 `
-			if err := os.WriteFile(filepath.Join(tools, "kubectl"), []byte(script), 0700); err != nil {
-				t.Fatal(err)
+			// The native replay pins the same six-argument GET shape; any other
+			// invocation fails like the script's unmatched arms.
+			var rules []fakeToolRule
+			for _, path := range []struct{ raw, body string }{
+				{"/apis", `{"apiVersion":"v1","kind":"APIGroupList","groups":[{"name":"core.orka.ai","versions":[{"groupVersion":"core.orka.ai/v1alpha1","version":"v1alpha1"}]}]}`},
+				{"/apis/core.orka.ai/v1alpha1", `{"apiVersion":"v1","kind":"APIResourceList","groupVersion":"core.orka.ai/v1alpha1","resources":[{"name":"agents","kind":"Agent","namespaced":true,"verbs":["get","list"]}]}`},
+				{"/api/v1/namespaces/kube-system", `{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"kube-system","uid":"cluster-uid"}}`},
+				{"/api/v1/namespaces/agents", `{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"agents","uid":"namespace-uid"}}`},
+				{"/apis/core.orka.ai/v1alpha1/namespaces/agents/agents?limit=128", `{"apiVersion":"core.orka.ai/v1alpha1","kind":"AgentList","metadata":{"resourceVersion":"10","continue":""},"items":[]}`},
+			} {
+				rules = append(rules, fakeToolRule{Match: "exact", Args: "--context " + wantContext + " --request-timeout=10s get --raw " + path.raw, Stdout: path.body})
 			}
+			installFakeTool(t, tools, "kubectl", script, fakeTool{Log: log, LogLine: "${ARGS}", Rules: rules, DefaultExit: 92})
 			t.Setenv("PATH", tools)
 			var out, diag bytes.Buffer
 			deps, loads := testDependencies(&out, &diag)

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,6 +17,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/config"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 )
 
 // Configuration contains routing metadata only. Tokens remain host-side and are
@@ -60,7 +60,7 @@ func loadFoundryChatConfig() (foundryChatConfig, error) {
 	if err != nil {
 		return c, err
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := readPrivatePreference(path)
 	if err != nil {
 		return c, err
 	}
@@ -77,7 +77,7 @@ func saveFoundryChatConfig(c foundryChatConfig) error {
 	if err != nil {
 		return err
 	}
-	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err = fileaccess.EnsurePrivatePath(filepath.Dir(path)); err != nil {
 		return err
 	}
 	raw, err := json.MarshalIndent(c, "", "  ")

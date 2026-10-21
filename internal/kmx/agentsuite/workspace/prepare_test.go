@@ -262,6 +262,7 @@ func TestPrepareRefusesSymlinksAndOverlappingCache(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err := os.Symlink(real, name); err != nil {
+				symlinkUnavailable(t, err)
 				t.Fatal(err)
 			}
 			if _, err := workspace.Prepare(context.Background(), root, cache); err == nil {
@@ -277,6 +278,7 @@ func TestPrepareRefusesSymlinksAndOverlappingCache(t *testing.T) {
 	}
 	alias := filepath.Join(t.TempDir(), "alias")
 	if err := os.Symlink(root, alias); err != nil {
+		symlinkUnavailable(t, err)
 		t.Fatal(err)
 	}
 	if _, err := workspace.Prepare(context.Background(), root, filepath.Join(alias, "cache")); err == nil {

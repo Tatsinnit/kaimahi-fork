@@ -26,14 +26,20 @@ func TestSuiteDiffArtifactsEndToEnd(t *testing.T) {
 	mutateIncidentAnalystSuite(t, afterSuite)
 
 	binary := filepath.Join(t.TempDir(), "kmx")
+	if runtime.GOOS == "windows" {
+		// Windows process creation resolves only executable extensions.
+		binary += ".exe"
+	}
 	buildContext, cancelBuild := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancelBuild()
+	t.Log("building CLI subprocess fixture")
 	command := exec.CommandContext(buildContext, "go", "build", "-o", binary, "./cmd/kmx")
 	command.Dir = root
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build kmx: %v\n%s", err, output)
 	}
 
+	t.Log("CLI subprocess fixture built")
 	runKMX(t, binary, "suite", "validate", beforeSuite)
 	runKMX(t, binary, "suite", "validate", afterSuite)
 
@@ -282,6 +288,7 @@ func runKMX(t *testing.T, binary string, args ...string) string {
 	t.Helper()
 	commandContext, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
+	t.Logf("CLI subprocess: %v", args)
 	command := exec.CommandContext(commandContext, binary, args...)
 	output, err := command.CombinedOutput()
 	if err != nil {

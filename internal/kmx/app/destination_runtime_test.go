@@ -66,7 +66,7 @@ func TestResolvedDestinationConfigEditDuringEvaluationGuardCannotRedirect(t *tes
 }
 
 func TestDestinationRuntimeExpectationEvaluationRefusesOffline(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	for _, runtime := range []string{"kagent", "agentsessions", "invalid"} {
 		opt := nativeEvaluationOptions(t)
 		opt.ExpectedRuntime = runtime

@@ -114,7 +114,7 @@ func TestCompletionExcludesRetiredApprovalCommands(t *testing.T) {
 }
 
 func TestCompletionContextUsesEngineFlagOverInvalidEnvironment(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	t.Setenv("KIND_CLUSTER", "podman-demo")
 	t.Setenv("CONTAINER_ENGINE", "containerd")
 	var out, errOut bytes.Buffer

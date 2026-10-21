@@ -2,23 +2,20 @@ package oras
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
-	"time"
 
 	agentsuite "github.com/agent-primitives/suite"
 	kmxsuite "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2/content"
-	"oras.land/oras-go/v2/content/oci"
 )
 
 // PullResult identifies an AgentSuite extracted from a referenced OCI target.
@@ -45,6 +42,9 @@ func Pull(
 	if reference == "" {
 		return PullResult{}, errors.New("AgentSuite pull reference is required")
 	}
+	if err := fileaccess.RefuseWindowsDriveMount(output); err != nil {
+		return PullResult{}, err
+	}
 	sourcePath, err := filepath.Abs(source)
 	if err != nil {
 		return PullResult{}, err
@@ -56,10 +56,14 @@ func Pull(
 	if pathWithin(sourcePath, outputPath) {
 		return PullResult{}, errors.New("AgentSuite output must be outside the source OCI layout")
 	}
+	if within, err := physicalWithin(sourcePath, outputPath); err != nil || within {
+		return PullResult{}, errors.Join(errors.New("AgentSuite output must be outside the source OCI layout"), err)
+	}
 	if err := requireOCILayout(sourcePath, "AgentSuite source"); err != nil {
 		return PullResult{}, err
 	}
-	sourceStore, err := oci.New(sourcePath)
+	// Windows opens an immutable source; Unix retains its original store setup.
+	sourceStore, err := openLayoutSource(ctx, sourcePath)
 	if err != nil {
 		return PullResult{}, fmt.Errorf("open AgentSuite OCI source: %w", err)
 	}
@@ -92,18 +96,21 @@ func pullToDirectory(
 		return PullResult{}, fmt.Errorf("AgentSuite output parent %s is not a directory", outputParent)
 	}
 
-	pulledRoot, err := os.MkdirTemp("", "agentsuite-pulled-*")
+	pulledRoot, err := fileaccess.PrivateTempDir("", "agentsuite-pulled-*")
 	if err != nil {
 		return PullResult{}, err
 	}
 	defer os.RemoveAll(pulledRoot)
-	pulledStore, err := oci.New(pulledRoot)
+	pulledStore, err := newPrivateStore(pulledRoot)
 	if err != nil {
 		return PullResult{}, fmt.Errorf("create AgentSuite pull CAS: %w", err)
 	}
 	root, err := NewPuller(source).Pull(ctx, reference, pulledStore)
 	if err != nil {
 		return PullResult{}, err
+	}
+	if err := verifyPrivateTree(pulledRoot); err != nil {
+		return PullResult{}, fmt.Errorf("check AgentSuite pull CAS: %w", err)
 	}
 	report, err := (LayoutValidator{}).Validate(ctx, pulledStore, root)
 	if err != nil {
@@ -118,7 +125,7 @@ func pullToDirectory(
 		warnings = append(warnings, listErr.Error())
 	}
 
-	stageRoot, err := os.MkdirTemp(outputParent, "."+filepath.Base(outputPath)+"-*")
+	stageRoot, err := fileaccess.PrivateTempDir(outputParent, "."+filepath.Base(outputPath)+"-*")
 	if err != nil {
 		return PullResult{}, fmt.Errorf("create staged AgentSuite output: %w", err)
 	}
@@ -140,10 +147,10 @@ func pullToDirectory(
 	if closeErr != nil {
 		return PullResult{}, fmt.Errorf("close AgentSuite content layer: %w", closeErr)
 	}
-	if err := os.Chmod(stageRoot, 0o755); err != nil {
+	if err := finishOutputDirectory(stageRoot); err != nil {
 		return PullResult{}, fmt.Errorf("set AgentSuite output mode: %w", err)
 	}
-	if err := os.Rename(stageRoot, outputPath); err != nil {
+	if err := publishDirectory(stageRoot, outputPath); err != nil {
 		return PullResult{}, fmt.Errorf("publish extracted AgentSuite: %w", err)
 	}
 	publishOutput = false
@@ -175,105 +182,6 @@ func contentLayerDescriptor(
 		return ocispec.Descriptor{}, errors.New("AgentSuite manifest must contain exactly one content layer")
 	}
 	return manifest.Layers[0], nil
-}
-
-func extractContentLayer(ctx context.Context, src io.Reader, destination string) (err error) {
-	gzipReader, err := gzip.NewReader(src)
-	if err != nil {
-		return fmt.Errorf("open AgentSuite content gzip: %w", err)
-	}
-	defer func() {
-		err = errors.Join(err, gzipReader.Close())
-	}()
-	root, err := os.OpenRoot(destination)
-	if err != nil {
-		return fmt.Errorf("open AgentSuite extraction root: %w", err)
-	}
-	defer func() {
-		err = errors.Join(err, root.Close())
-	}()
-
-	tarReader := tar.NewReader(gzipReader)
-	var directories []extractedDirectory
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		header, err := tarReader.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("read AgentSuite content tar: %w", err)
-		}
-		name, err := extractionPath(header)
-		if err != nil {
-			return err
-		}
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := root.MkdirAll(name, 0o755); err != nil {
-				return fmt.Errorf("create AgentSuite directory %s: %w", header.Name, err)
-			}
-			directories = append(directories, extractedDirectory{name: name, mode: os.FileMode(header.Mode & 0o777)})
-		case tar.TypeReg:
-			if err := root.MkdirAll(filepath.Dir(name), 0o755); err != nil {
-				return fmt.Errorf("create AgentSuite parent for %s: %w", header.Name, err)
-			}
-			file, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, os.FileMode(header.Mode&0o777))
-			if err != nil {
-				return fmt.Errorf("create AgentSuite file %s: %w", header.Name, err)
-			}
-			written, copyErr := io.CopyN(file, &contextReader{ctx: ctx, reader: tarReader}, header.Size)
-			closeErr := file.Close()
-			if copyErr != nil {
-				return fmt.Errorf("extract AgentSuite file %s: %w", header.Name, copyErr)
-			}
-			if closeErr != nil {
-				return fmt.Errorf("close AgentSuite file %s: %w", header.Name, closeErr)
-			}
-			if written != header.Size {
-				return fmt.Errorf("AgentSuite file %s size does not match its header", header.Name)
-			}
-			if err := root.Chmod(name, os.FileMode(header.Mode&0o777)); err != nil {
-				return fmt.Errorf("set AgentSuite file mode %s: %w", header.Name, err)
-			}
-			if err := root.Chtimes(name, time.Unix(0, 0), time.Unix(0, 0)); err != nil {
-				return fmt.Errorf("set AgentSuite file time %s: %w", header.Name, err)
-			}
-		case tar.TypeSymlink:
-			if err := root.MkdirAll(filepath.Dir(name), 0o755); err != nil {
-				return fmt.Errorf("create AgentSuite parent for %s: %w", header.Name, err)
-			}
-			if err := root.Symlink(filepath.FromSlash(header.Linkname), name); err != nil {
-				return fmt.Errorf("create AgentSuite symlink %s: %w", header.Name, err)
-			}
-		case tar.TypeLink:
-			if err := root.MkdirAll(filepath.Dir(name), 0o755); err != nil {
-				return fmt.Errorf("create AgentSuite parent for %s: %w", header.Name, err)
-			}
-			if err := root.Link(filepath.FromSlash(header.Linkname), name); err != nil {
-				return fmt.Errorf("create AgentSuite hardlink %s: %w", header.Name, err)
-			}
-		default:
-			return fmt.Errorf("AgentSuite content %s has unsupported tar type %d", header.Name, header.Typeflag)
-		}
-	}
-	for i := len(directories) - 1; i >= 0; i-- {
-		directory := directories[i]
-		if err := root.Chmod(directory.name, directory.mode); err != nil {
-			return fmt.Errorf("set AgentSuite directory mode %s: %w", directory.name, err)
-		}
-		if err := root.Chtimes(directory.name, time.Unix(0, 0), time.Unix(0, 0)); err != nil {
-			return fmt.Errorf("set AgentSuite directory time %s: %w", directory.name, err)
-		}
-	}
-	return nil
-}
-
-type extractedDirectory struct {
-	name string
-	mode os.FileMode
 }
 
 func extractionPath(header *tar.Header) (string, error) {

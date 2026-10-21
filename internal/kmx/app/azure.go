@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/lift"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/run"
 )
@@ -131,7 +132,7 @@ func (a *App) isolatedAzureRunner() (*run.Runner, func(), error) {
 	if a.Run == nil {
 		return nil, func() {}, errors.New("Azure CLI runner is unavailable")
 	}
-	extensions, err := os.MkdirTemp("", "kmx-az-extensions-*")
+	extensions, err := fileaccess.PrivateTempDir("", "kmx-az-extensions-*")
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("create private Azure CLI extension workspace: %w", err)
 	}

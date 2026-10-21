@@ -18,7 +18,7 @@ var recordTestID = strings.Repeat("0123456789abcdef", 2)
 
 func recordTestInput(t *testing.T) (ReleaseLiftSummary, []byte, string) {
 	t.Helper()
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	raw := []byte(`{"canonical":"retained <exactly>"}`)
 	return ReleaseLiftSummary{EvidenceDigest: fmt.Sprintf("sha256:%x", sha256.Sum256(raw)), Resources: []ReleaseLiftResource{{Kind: "Provider", Name: "greeter", Action: "create", SpecDigest: "provider-spec"}, {Kind: "Agent", Name: "greeter", Action: "create", SpecDigest: "agent-spec"}}}, raw, `{"version":1,"liftID":"` + recordTestID + `"}`
 }
@@ -28,7 +28,7 @@ func recordTestPath(name string) string {
 }
 
 func TestReleaseLiftRecordImmutableSnapshots(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	a, _, opt, _ := releaseLiftFixture(t)
 	p, err := a.PrepareReleaseLift(t.Context(), opt)
 	if err != nil {

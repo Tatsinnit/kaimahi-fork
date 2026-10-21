@@ -35,7 +35,7 @@ func TestPreflightFetchesAMissingClusterTool(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	home := t.TempDir()
+	home := privateSuiteDir(t)
 	t.Setenv("KMX_HOME", home)
 	t.Setenv("KMX_TOOLCHAIN", "")
 	empty := t.TempDir()
@@ -98,7 +98,7 @@ func TestPreflightFetchesMissingHelmFromVerifiedArchive(t *testing.T) {
 		w.Write(archive.Bytes())
 	}))
 	defer srv.Close()
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	t.Setenv("KMX_TOOLCHAIN", "")
 	t.Setenv("PATH", t.TempDir())
 	toolchainBase = srv.URL
@@ -124,7 +124,7 @@ func TestPreflightFetchesMissingHelmFromVerifiedArchive(t *testing.T) {
 // The opt-out is a real opt-out: nothing is downloaded, and the operator is
 // told what to install.
 func TestKmxToolchainOffRestoresTheInstallInstructions(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("KMX_TOOLCHAIN", "off")
 	toolchainBase = "http://127.0.0.1:1"
@@ -143,7 +143,7 @@ func TestKmxToolchainOffRestoresTheInstallInstructions(t *testing.T) {
 // A container engine is a daemon and a privileged system package. kmx must
 // say so rather than pretend it can be dropped into a cache directory.
 func TestTheContainerEngineIsNeverFetched(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	t.Setenv("PATH", t.TempDir())
 	toolchainBase = "http://127.0.0.1:1"
 	defer func() { toolchainBase = "" }()

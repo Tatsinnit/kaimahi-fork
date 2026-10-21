@@ -101,7 +101,8 @@ func suiteEvaluationError(ctx context.Context, err error, mayHaveChanged bool) e
 	if errors.Is(err, errSuitePassingExport) {
 		classified = errSuitePassingExport
 	}
-	return errors.Join(classified, cause)
+	// A named Windows-drive state/output refusal is path and remedy only.
+	return errors.Join(classified, cause, windowsDriveMountCause(err))
 }
 
 func (a *App) evaluateSuiteNativeCandidate(ctx context.Context, placement *suiteNativePlacement, frame suitePassingInventoryCase, port string, judge agentruntime.EvaluationJudge, run *suiteCandidateRun) (suitePassingObservation, error) {

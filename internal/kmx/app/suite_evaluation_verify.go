@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	agentsuite "github.com/agent-primitives/suite"
-	"golang.org/x/sys/unix"
 )
 
 // SuiteEvaluationVerifyOptions selects only local public verification inputs.
@@ -87,7 +86,7 @@ func (a *App) VerifySuiteEvaluation(ctx context.Context, opt SuiteEvaluationVeri
 	} else {
 		// References and URLs never trigger lookup, even if a similarly named
 		// local directory exists. The shared verifier validates the layout itself.
-		if strings.ContainsAny(opt.Suite, ":@") || strings.HasPrefix(opt.Suite, "//") {
+		if suiteEvaluationReference(opt.Suite) {
 			return suiteEvaluationRefuse("artifact")
 		}
 		if opt.FromLayout != "" {
@@ -163,7 +162,7 @@ func (a *App) VerifySuiteEvaluation(ctx context.Context, opt SuiteEvaluationVeri
 // directory, then use the existing nofollow/nonblocking final-component seam;
 // neither a final FIFO nor a FIFO masquerading as a parent can block open.
 func readSuiteEvaluationVerifyFile(path string) ([]byte, error) {
-	dir, err := os.OpenFile(filepath.Dir(path), os.O_RDONLY|unix.O_DIRECTORY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	dir, err := openSuiteEvaluationVerifyDirectory(filepath.Dir(path))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, suiteEvaluationRefuse("missing")

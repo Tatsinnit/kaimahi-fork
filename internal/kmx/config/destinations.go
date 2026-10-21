@@ -14,7 +14,6 @@ import (
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/scaffold"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/secretshapes"
 	"go.yaml.in/yaml/v3"
-	"golang.org/x/sys/unix"
 	"oras.land/oras-go/v2/registry"
 )
 
@@ -60,14 +59,13 @@ func LoadDestinations(root string) (*Destinations, error) {
 		return nil, ErrDestinationsInvalid
 	}
 	defer dir.Close()
-	fd, err := unix.Openat(int(dir.Fd()), "kmx.yaml", unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
-	if errors.Is(err, unix.ENOENT) {
+	file, err := openDestinationsFile(dir)
+	if os.IsNotExist(err) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, ErrDestinationsInvalid
 	}
-	file := os.NewFile(uintptr(fd), "kmx.yaml")
 	defer file.Close()
 	before, err := file.Stat()
 	if err != nil || !before.Mode().IsRegular() || before.Size() > maxDestinationsBytes {
@@ -133,26 +131,6 @@ func LoadDestinations(root string) (*Destinations, error) {
 		doc.Targets[name] = target
 	}
 	return &doc, nil
-}
-
-func openDestinationsRoot(abs string) (*os.File, error) {
-	fd, err := unix.Open(string(filepath.Separator), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
-	if err != nil {
-		return nil, err
-	}
-	dir := os.NewFile(uintptr(fd), "/")
-	for _, part := range strings.Split(strings.TrimPrefix(abs, "/"), "/") {
-		if part == "" {
-			continue
-		}
-		fd, err = unix.Openat(int(dir.Fd()), part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
-		dir.Close()
-		if err != nil {
-			return nil, err
-		}
-		dir = os.NewFile(uintptr(fd), part)
-	}
-	return dir, nil
 }
 
 // Validate scalar tags before decoding: yaml's ordinary string decoding would

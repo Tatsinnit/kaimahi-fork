@@ -29,7 +29,7 @@ func releaseUpdateLiveApp(t *testing.T) (*App, context.Context) {
 	if contextName != "kind-kmx-update-proof" && contextName != "kind-kmx-orka" {
 		t.Fatal("update qualification requires its dedicated or explicitly opted-in CI context")
 	}
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	a := &App{Cfg: &config.Config{KubeContext: contextName},
 		Run: &run.Runner{Stdout: io.Discard, Stderr: io.Discard}, Out: io.Discard, Err: io.Discard}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)

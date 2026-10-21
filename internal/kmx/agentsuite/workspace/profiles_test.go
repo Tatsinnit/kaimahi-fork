@@ -416,6 +416,7 @@ func TestProfiledSourceRefusals(t *testing.T) {
 			}
 			writeFile(t, filepath.Join(r, "runtime-profiles/real.json"), string(data))
 			if err := os.Symlink("real.json", p); err != nil {
+				symlinkUnavailable(t, err)
 				t.Fatal(err)
 			}
 		},

@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	agentsuite "github.com/agent-primitives/suite"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	godigest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -176,19 +177,19 @@ func read(ctx context.Context, source Fetcher, root ocispec.Descriptor, expected
 }
 
 func validateSelectedGraph(ctx context.Context, root ocispec.Descriptor, manifestBytes []byte, config ocispec.Descriptor, configBytes []byte, layer ocispec.Descriptor, layerBytes []byte, flowMode bool) (graph *agentsuite.FlowV1Alpha1Graph, err error) {
-	stage, err := os.MkdirTemp("", "kmx-artifact-*")
+	stage, err := fileaccess.PrivateTempDir("", "kmx-artifact-*")
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = errors.Join(err, os.RemoveAll(stage)) }()
-	if err := os.MkdirAll(pathOnDisk(stage, "blobs/sha256"), 0o700); err != nil {
+	if err := fileaccess.EnsurePrivatePath(pathOnDisk(stage, "blobs/sha256")); err != nil {
 		return nil, err
 	}
 	for _, item := range []struct {
 		descriptor ocispec.Descriptor
 		body       []byte
 	}{{root, manifestBytes}, {config, configBytes}, {layer, layerBytes}} {
-		if err := os.WriteFile(pathOnDisk(stage, "blobs/sha256/"+item.descriptor.Digest.Encoded()), item.body, 0o600); err != nil {
+		if err := fileaccess.WritePrivateFile(pathOnDisk(stage, "blobs/sha256/"+item.descriptor.Digest.Encoded()), item.body, 0o600); err != nil {
 			return nil, err
 		}
 	}
@@ -196,7 +197,7 @@ func validateSelectedGraph(ctx context.Context, root ocispec.Descriptor, manifes
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(pathOnDisk(stage, "oci-layout"), layoutBytes, 0o600); err != nil {
+	if err := fileaccess.WritePrivateFile(pathOnDisk(stage, "oci-layout"), layoutBytes, 0o600); err != nil {
 		return nil, err
 	}
 	selected := cloneOCIDescriptor(root)
@@ -207,7 +208,7 @@ func validateSelectedGraph(ctx context.Context, root ocispec.Descriptor, manifes
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(pathOnDisk(stage, "index.json"), indexBytes, 0o600); err != nil {
+	if err := fileaccess.WritePrivateFile(pathOnDisk(stage, "index.json"), indexBytes, 0o600); err != nil {
 		return nil, err
 	}
 	if flowMode {

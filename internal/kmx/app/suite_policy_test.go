@@ -26,7 +26,7 @@ func addWorkspacePolicy(t *testing.T, root string) {
 }
 
 func TestDeclaredPolicyRefusesEvaluationAndComposedLiftBeforeOutput(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	opt := nativeEvaluationOptions(t)
 	addWorkspacePolicy(t, opt.Workspace)
 	// An invalid output location would fail differently if output preflight ran.
@@ -53,7 +53,7 @@ func TestDeclaredPolicyRefusesEvaluationAndComposedLiftBeforeOutput(t *testing.T
 	}
 }
 func TestDeclaredPolicyRefusesPrivateNativePreparationBeforeReads(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	opt := nativeEvaluationOptions(t)
 	addWorkspacePolicy(t, opt.Workspace)
 	p, err := workspace.Prepare(t.Context(), opt.Workspace, filepath.Join(t.TempDir(), "cache"))
@@ -77,7 +77,7 @@ func TestDeclaredPolicyRefusesPrivateNativePreparationBeforeReads(t *testing.T) 
 	}
 }
 func TestDeclaredPolicyRefusesReceiptAndReleaseLiftBeforeReads(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	root, prepared, suite, placement, observations := passingFixture(t)
 	receipt, err := newSuitePassingReceipt(t.Context(), prepared, placement, observations)
 	if err != nil {
@@ -128,7 +128,7 @@ func TestDeclaredPolicyRefusesReceiptAndReleaseLiftBeforeReads(t *testing.T) {
 	}
 }
 func TestDeclaredPolicyUnevaluatedPushPreservesGraph(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateSuiteDir(t))
 	opt := nativeEvaluationOptions(t)
 	addWorkspacePolicy(t, opt.Workspace)
 	var out, diagnostics bytes.Buffer
