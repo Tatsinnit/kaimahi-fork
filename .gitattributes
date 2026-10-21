@@ -1,0 +1,3 @@
+# AgentSuite descriptors bind exact fixture bytes, including instruction LF.
+# Checkout conversion would change sizes/digests without updating descriptors.
+/testdata/agentsuite/** -text
