@@ -140,9 +140,15 @@ production ACL check to accept inherited temp permissions. Do not use
 state/cache/output refusal is separate from read-only Windows inputs; see
 [Windows and WSL storage isolation](windows.md#native-windows-and-wsl-must-not-share-writable-state).
 
-The native Windows CI job uses `scripts/ci/windows-tests` to verify the original
-token-owner refusal and, only when necessary, launch tests with a duplicated
-primary token whose child default owner is its user. The launcher is
+CI reports native Ubuntu and Windows builds separately. Both hosted amd64 runners
+build and execute the CLI through `version` and `--help`; Linux and Windows arm64
+are compiled and vetted, not natively executed. These build lanes are clusterless
+and make no Docker, kind, runtime or model-execution claim. Existing e2e shards
+retain those responsibilities.
+
+The native Windows job additionally uses `scripts/ci/windows-tests` to verify the
+original token-owner refusal and, only when necessary, launch tests with a
+duplicated primary token whose child default owner is its user. The launcher is
 [`main_windows.go`](../scripts/ci/windows-tests/main_windows.go), with native
 contract tests in [`main_windows_test.go`](../scripts/ci/windows-tests/main_windows_test.go).
 It never changes the

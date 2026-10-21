@@ -61,6 +61,38 @@ jobs:
           path: kmx-app-test.json
           retention-days: 3
 
+  # Keep the ordinary Linux CLI build visible as a platform result instead of
+  # relying only on the broader hygiene and cluster jobs. The hosted runner is
+  # amd64; arm64 is compiled and vetted below but not executed.
+  native-ubuntu:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Build and run native CLI
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          go build -trimpath -o "$RUNNER_TEMP/kmx" ./cmd/kmx
+          "$RUNNER_TEMP/kmx" version
+          "$RUNNER_TEMP/kmx" --help >/dev/null
+      - name: Linux arm64 compile and vet (not native arm64 execution)
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          go build ./...
+          go vet ./...
+
   native-windows:
     if: github.event_name != 'schedule'
     runs-on: windows-latest

@@ -31,6 +31,9 @@ to do. Sections: **Added**, **Changed**, **Fixed**, **Breaking**, **Upgrading**.
   `%LOCALAPPDATA%\kmx`, retains `KMX_HOME`, and requires no WSL for offline
   operations. Unsafe existing private state is refused, never repaired. Existing
   v0.8.1 binaries remain Unix-only. See [Windows boundaries](docs/windows.md).
+- Explicit native Ubuntu and Windows CI build lanes execute the CLI on hosted
+  amd64 runners. Linux and Windows arm64 compile and vet in those lanes without
+  claiming native arm64, Docker, kind, cluster or model execution coverage.
 
 - Experimental offline multi-agent flow authoring with `kmx create NAME
   --workspace DIR --members FILE --flow FILE`, deterministic preparation and
