@@ -351,6 +351,7 @@ and intentionally has no hero image.
 
 | `staticcheck.conf` | **Scaffolding** | Root-module lint configuration. |
 | `go.mod`, `go.sum` | **Installed tooling** | Root module dependencies. |
+| `.gitattributes` | **Scaffolding** | Preserves exact AgentSuite fixture bytes during checkout, including digest-bound instruction line endings. |
 | `.gitignore` | **Scaffolding** | Checkout exclusions, including generated documentation output and dependencies. |
 | `.dockerignore` | **Scaffolding** | Defensive exclusions for root Docker contexts, including sensitive operator data and documentation-only dependencies. |
 
