@@ -157,6 +157,30 @@ func ensurePrivateDirectoryDisposition(parent windows.Handle, name string, dispo
 	return handle, nil
 }
 
+// OpenExistingPrivateDirectory opens a protected private root without creating
+// anything. Its ancestor checks match EnsurePrivatePath, including the stricter
+// immediate-parent policy; FILE_OPEN never creates or changes the named root.
+func OpenExistingPrivateDirectory(path string) (*os.File, error) {
+	p, err := parseLocalPath(path)
+	if err == nil && len(p.parts) == 0 {
+		err = errors.New("a volume root cannot be a private directory")
+	}
+	if err != nil {
+		return nil, pathError("open", path, err)
+	}
+	last := len(p.parts) - 1
+	parent, err := walkDirectory(localPath{drive: p.drive, parts: p.parts[:last]}, walkOptions{checked: true})
+	if err != nil {
+		return nil, pathError("open", path, err)
+	}
+	defer windows.CloseHandle(parent)
+	handle, err := ensurePrivateDirectoryDisposition(parent, p.parts[last], windows.FILE_OPEN, true)
+	if err != nil {
+		return nil, pathError("open", path, err)
+	}
+	return os.NewFile(uintptr(handle), p.String()), nil
+}
+
 // EnsurePrivatePath creates or checks the private directory root at path.
 // Every existing ancestor must satisfy the public ancestor policy, with the
 // immediate parent under the stricter immediate rule; missing ancestors are

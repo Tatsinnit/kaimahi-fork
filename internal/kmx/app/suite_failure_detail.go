@@ -10,7 +10,6 @@ import (
 	"net"
 	"regexp"
 	"strings"
-	"syscall"
 	"unicode"
 	"unicode/utf8"
 
@@ -162,7 +161,7 @@ func suiteFailureClass(err error) string {
 		return "canceled"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "timeout"
-	case errors.Is(err, syscall.ECONNREFUSED):
+	case suiteFailureConnectionRefused(err):
 		return "connection-refused"
 	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
 		return "eof"

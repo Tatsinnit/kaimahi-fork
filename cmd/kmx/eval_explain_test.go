@@ -2,13 +2,13 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 )
 
 func TestSuiteFailureExplainCommand(t *testing.T) {
@@ -26,11 +26,11 @@ func TestSuiteFailureExplainCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := "f-" + strings.Repeat("a", 32)
-	path := filepath.Join(home, "eval-failures", fmt.Sprintf("%x", sha256.Sum256([]byte(workspace))))
-	if err := os.MkdirAll(path, 0700); err != nil {
+	path := filepath.Join(home, "eval-failures", failureExplainWorkspaceKey(t, workspace))
+	if err := fileaccess.EnsurePrivatePath(path); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(path, "lock"), nil, 0600); err != nil {
+	if err := fileaccess.WritePrivateFile(filepath.Join(path, "lock"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
 	record := map[string]any{"schemaVersion": 1, "sequence": 1, "detail": map[string]any{
@@ -40,7 +40,7 @@ func TestSuiteFailureExplainCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(path, "00000000000000000001-"+id+".json"), raw, 0600); err != nil {
+	if err := fileaccess.WritePrivateFile(filepath.Join(path, "00000000000000000001-"+id+".json"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {

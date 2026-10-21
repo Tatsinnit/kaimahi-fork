@@ -3,7 +3,6 @@ package app
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,11 +13,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/config"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/secretshapes"
-	"golang.org/x/sys/unix"
 )
 
 const maxSuiteFailureRecords = 10
@@ -51,26 +49,16 @@ type suiteFailureStore struct {
 	lockInfo  os.FileInfo
 	path      string
 	writeFile func(*os.File, []byte) (int, error)
+	syncFile  func(*os.File) error
 	closeFile func(*os.File) error
-	rename    func(string, string) error
+	// publish makes the flushed stage visible under its final name: the
+	// existing rename on Unix, an exclusive link on Windows.
+	publish       func(string, string) error
+	syncDirectory func(*os.File) error
 }
 
-func suiteFailureOwned(info os.FileInfo) bool {
-	if info == nil {
-		return false
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	return ok && stat.Uid == uint32(os.Geteuid())
-}
-func safeSuiteFailureDirectory(info os.FileInfo) bool {
-	return suiteFailureOwned(info) && info.IsDir() && info.Mode().Perm() == 0700
-}
-func safeSuiteFailureFile(info os.FileInfo) bool {
-	if !suiteFailureOwned(info) || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Size() > maxSuiteFailureRecordBytes {
-		return false
-	}
-	return info.Sys().(*syscall.Stat_t).Nlink == 1
-}
+// Ownership, privacy, link-count, lock and publication decisions are
+// platform adapters (suite_failure_store_{unix,windows}.go).
 
 func openSuiteFailureStore(workspaceRoot string, create bool) (_ *suiteFailureStore, err error) {
 	workspaceRoot, err = filepath.EvalSymlinks(workspaceRoot)
@@ -85,7 +73,15 @@ func openSuiteFailureStore(workspaceRoot string, create bool) (_ *suiteFailureSt
 	if e != nil || !info.IsDir() {
 		return nil, errSuiteFailureStore
 	}
-	state, e := config.StateDir()
+	var state string
+	if create {
+		state, e = config.StateDir()
+	} else {
+		state, e = config.ExistingStateDir()
+	}
+	if !create && os.IsNotExist(e) {
+		return nil, errSuiteFailureMissing
+	}
 	if e != nil {
 		return nil, errSuiteFailureStore
 	}
@@ -94,7 +90,11 @@ func openSuiteFailureStore(workspaceRoot string, create bool) (_ *suiteFailureSt
 		return nil, errSuiteFailureStore
 	}
 	base := filepath.Join(state, "eval-failures")
-	path := filepath.Join(base, fmt.Sprintf("%x", sha256.Sum256([]byte(workspaceRoot))))
+	key, e := suiteFailureWorkspaceKey(workspaceRoot)
+	if e != nil {
+		return nil, errSuiteFailureStore
+	}
+	path := filepath.Join(base, key)
 	if suiteReceiptInside(base, workspaceRoot) {
 		return nil, errSuiteFailureStore
 	}
@@ -106,46 +106,30 @@ func openSuiteFailureStore(workspaceRoot string, create bool) (_ *suiteFailureSt
 		}
 	}
 	for _, p := range []string{base, path} {
-		info, e := os.Lstat(p)
-		if os.IsNotExist(e) && !create {
-			return nil, errSuiteFailureMissing
-		}
-		if e != nil || !safeSuiteFailureDirectory(info) {
-			return nil, errSuiteFailureStore
+		if e := checkSuiteFailureDirectory(p, create); e != nil {
+			return nil, e
 		}
 	}
 	root, _, _, e := openSessionReferenceDirectory(filepath.Join(path, "lock"))
 	if e != nil {
 		return nil, errSuiteFailureStore
 	}
-	s := &suiteFailureStore{root: root, path: path, writeFile: (*os.File).Write, closeFile: (*os.File).Close, rename: root.Rename}
+	s := &suiteFailureStore{root: root, path: path, writeFile: (*os.File).Write, syncFile: (*os.File).Sync, closeFile: (*os.File).Close, publish: suiteFailurePublish(root), syncDirectory: (*os.File).Sync}
 	defer func() {
 		if err != nil {
 			_ = s.Close()
 		}
 	}()
-	dir, e := root.Open(".")
+	lock, e := openSuiteFailureLock(root, create)
 	if e != nil {
 		return nil, errSuiteFailureStore
 	}
-	flags := unix.O_RDWR | unix.O_NOFOLLOW | unix.O_NONBLOCK | unix.O_CLOEXEC
-	if create {
-		flags |= unix.O_CREAT
-	}
-	fd, e := unix.Openat(int(dir.Fd()), "lock", flags, 0600)
-	closeErr := dir.Close()
-	if e != nil || closeErr != nil {
-		if e == nil {
-			_ = unix.Close(fd)
-		}
-		return nil, errSuiteFailureStore
-	}
-	s.lock = os.NewFile(uintptr(fd), "lock")
+	s.lock = lock
 	s.lockInfo, e = s.lock.Stat()
-	if e != nil || !safeSuiteFailureFile(s.lockInfo) || s.lockInfo.Size() != 0 {
+	if e != nil || !suiteFailureFileOK(s.lock, s.lockInfo) || s.lockInfo.Size() != 0 {
 		return nil, errSuiteFailureStore
 	}
-	if unix.Flock(int(s.lock.Fd()), unix.LOCK_EX|unix.LOCK_NB) != nil {
+	if tryLockFile(s.lock) != nil {
 		return nil, errSuiteFailureBusy
 	}
 	if s.unchanged() != nil {
@@ -177,10 +161,12 @@ func (s *suiteFailureStore) unchanged() error {
 		return errSuiteFailureStore
 	}
 	old, oldErr := s.root.Stat(".")
+	// Decide privacy on the fresh directory while it is still open.
+	parentOK := suiteFailureRootDirOK(fresh, parent)
 	closeErr := fresh.Close()
-	base, baseErr := os.Lstat(filepath.Dir(s.path))
+	baseErr := checkSuiteFailureDirectory(filepath.Dir(s.path), true)
 	lock, lockErr := s.root.Lstat("lock")
-	if oldErr != nil || closeErr != nil || baseErr != nil || !safeSuiteFailureDirectory(base) || !safeSuiteFailureDirectory(parent) || !os.SameFile(old, parent) || lockErr != nil || !safeSuiteFailureFile(lock) || lock.Size() != 0 || !os.SameFile(lock, s.lockInfo) {
+	if oldErr != nil || closeErr != nil || baseErr != nil || !parentOK || !os.SameFile(old, parent) || lockErr != nil || !suiteFailureEntryOK(s.root, "lock", lock) || lock.Size() != 0 || !os.SameFile(lock, s.lockInfo) {
 		return errSuiteFailureStore
 	}
 	return nil
@@ -193,7 +179,7 @@ func (s *suiteFailureStore) pending() (*suiteFailureEntry, error) {
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
-	if err != nil || !safeSuiteFailureFile(info) {
+	if err != nil || !suiteFailureEntryOK(s.root, suiteFailurePendingName, info) {
 		return nil, errSuiteFailureStore
 	}
 	return &suiteFailureEntry{name: suiteFailurePendingName, info: info}, nil
@@ -231,7 +217,7 @@ func (s *suiteFailureStore) scan() ([]suiteFailureEntry, error) {
 			return nil, errSuiteFailureStore
 		}
 		info, e := s.root.Lstat(name)
-		if e != nil || !safeSuiteFailureFile(info) {
+		if e != nil || !suiteFailureEntryOK(s.root, name, info) {
 			return nil, errSuiteFailureStore
 		}
 		directory, e := s.root.Open(".")
@@ -247,7 +233,7 @@ func (s *suiteFailureStore) scan() ([]suiteFailureEntry, error) {
 			return nil, errSuiteFailureStore
 		}
 		opened, statErr := file.Stat()
-		if statErr != nil || !safeSuiteFailureFile(opened) || !os.SameFile(info, opened) {
+		if statErr != nil || !suiteFailureFileOK(file, opened) || !os.SameFile(info, opened) {
 			_ = file.Close()
 			return nil, errSuiteFailureStore
 		}
@@ -255,7 +241,7 @@ func (s *suiteFailureStore) scan() ([]suiteFailureEntry, error) {
 		after, afterErr := file.Stat()
 		closeErr := file.Close()
 		now, nowErr := s.root.Lstat(name)
-		if readErr != nil || afterErr != nil || closeErr != nil || nowErr != nil || !safeSuiteFailureFile(now) || !os.SameFile(opened, now) || !os.SameFile(opened, after) || opened.Size() != int64(len(raw)) || after.Size() != opened.Size() || !after.ModTime().Equal(opened.ModTime()) || len(raw) > maxSuiteFailureRecordBytes {
+		if readErr != nil || afterErr != nil || closeErr != nil || nowErr != nil || !suiteFailureEntryOK(s.root, name, now) || !os.SameFile(opened, now) || !os.SameFile(opened, after) || opened.Size() != int64(len(raw)) || after.Size() != opened.Size() || !after.ModTime().Equal(opened.ModTime()) || len(raw) > maxSuiteFailureRecordBytes {
 			return nil, errSuiteFailureStore
 		}
 		var record suiteFailureRecord
@@ -413,7 +399,7 @@ func (s *suiteFailureStore) remove(entry suiteFailureEntry) error {
 		return errSuiteFailureStore
 	}
 	now, e := s.root.Lstat(entry.name)
-	if e != nil || !safeSuiteFailureFile(now) || !os.SameFile(now, entry.info) || now.Size() != entry.info.Size() || !now.ModTime().Equal(entry.info.ModTime()) {
+	if e != nil || !suiteFailureEntryOK(s.root, entry.name, now) || !os.SameFile(now, entry.info) || now.Size() != entry.info.Size() || !now.ModTime().Equal(entry.info.ModTime()) {
 		return errSuiteFailureStore
 	}
 	if s.root.Remove(entry.name) != nil {
@@ -459,7 +445,9 @@ func (s *suiteFailureStore) save(ctx context.Context, d suiteFailureDetail) (id 
 		return "", errSuiteFailureStore
 	}
 	const stage = suiteFailurePendingName
-	file, e := s.root.OpenFile(stage, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	// createPrivateFile is the existing Root.OpenFile(..., 0600) on Unix and
+	// applies the current-user-only descriptor at creation on Windows.
+	file, e := createPrivateFile(s.root, stage, os.O_CREATE|os.O_EXCL|os.O_WRONLY)
 	if e != nil {
 		return "", errSuiteFailureStore
 	}
@@ -469,18 +457,18 @@ func (s *suiteFailureStore) save(ctx context.Context, d suiteFailureDetail) (id 
 		_ = file.Close()
 		if !published {
 			now, e := s.root.Lstat(stage)
-			if statErr == nil && e == nil && os.SameFile(info, now) && safeSuiteFailureFile(now) {
+			if statErr == nil && e == nil && os.SameFile(info, now) && suiteFailureEntryOK(s.root, stage, now) {
 				if s.root.Remove(stage) != nil {
 					err = errSuiteFailureStore
 				}
 			}
 		}
 	}()
-	if statErr != nil || !safeSuiteFailureFile(info) {
+	if statErr != nil || !suiteFailureFileOK(file, info) {
 		return "", errSuiteFailureStore
 	}
 	n, writeErr := s.writeFile(file, raw)
-	syncErr := file.Sync()
+	syncErr := s.syncFile(file)
 	closeErr := s.closeFile(file)
 	if writeErr != nil || n != len(raw) || syncErr != nil || closeErr != nil || s.unchanged() != nil {
 		return "", errSuiteFailureStore
@@ -490,18 +478,22 @@ func (s *suiteFailureStore) save(ctx context.Context, d suiteFailureDetail) (id 
 		return "", errSuiteFailureStore
 	}
 	current, e := s.root.Lstat(stage)
-	if e != nil || !safeSuiteFailureFile(current) || !os.SameFile(info, current) || current.Size() != int64(len(raw)) {
+	if e != nil || !suiteFailureEntryOK(s.root, stage, current) || !os.SameFile(info, current) || current.Size() != int64(len(raw)) {
 		return "", errSuiteFailureStore
 	}
-	if s.rename(stage, name) != nil {
+	if s.publish(stage, name) != nil {
 		return "", errSuiteFailureStore
 	}
+	// The complete record is visible from here; later failures keep its ID.
 	published = true
-	directory, e := s.root.Open(".")
+	if retireSuiteFailureStage(s, stage, info) != nil {
+		return id, errSuiteFailureStore
+	}
+	directory, e := fileaccess.OpenSyncDirectory(s.root)
 	if e != nil {
 		return id, errSuiteFailureStore
 	}
-	syncErr = directory.Sync()
+	syncErr = s.syncDirectory(directory)
 	closeErr = directory.Close()
 	if syncErr != nil || closeErr != nil || s.unchanged() != nil {
 		return id, errSuiteFailureStore
@@ -560,7 +552,7 @@ func clearSuiteFailures(ctx context.Context, workspaceRoot, id string) (int, err
 	if id != "" && removed == 0 {
 		return 0, errSuiteFailureMissing
 	}
-	directory, e := s.root.Open(".")
+	directory, e := fileaccess.OpenSyncDirectory(s.root)
 	if e != nil {
 		return removed, errSuiteFailureStore
 	}

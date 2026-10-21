@@ -3,6 +3,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,6 +38,27 @@ func nativeStateDirectory() (string, error) {
 // any broader access is refused, never repaired or adopted.
 func prepareStateDirectory(dir string) error {
 	return fileaccess.EnsurePrivatePath(dir)
+}
+
+// ExistingStateDir resolves the same state location without creating it.
+// Read-only inspection must be inert when state is absent, and must still
+// refuse an existing unsafe root rather than repair or adopt it.
+func ExistingStateDir() (string, error) {
+	dir, err := stateDirPath()
+	if err != nil {
+		return "", err
+	}
+	if err := fileaccess.RefuseWindowsDriveMount(dir); err != nil {
+		return "", err
+	}
+	root, err := fileaccess.OpenExistingPrivateDirectory(dir)
+	if err != nil {
+		return "", err
+	}
+	if err := errors.Join(fileaccess.CheckPrivate(root, true), root.Close()); err != nil {
+		return "", err
+	}
+	return dir, nil
 }
 
 func readSelectedContextFile(path string) ([]byte, error) {

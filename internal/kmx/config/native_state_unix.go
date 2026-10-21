@@ -22,6 +22,9 @@ func nativeStateDirectory() (string, error) {
 // never creates it, and writers keep their own 0700/0600 creation.
 func prepareStateDirectory(string) error { return nil }
 
+// ExistingStateDir preserves the non-creating Unix StateDir getter.
+func ExistingStateDir() (string, error) { return StateDir() }
+
 func readSelectedContextFile(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }

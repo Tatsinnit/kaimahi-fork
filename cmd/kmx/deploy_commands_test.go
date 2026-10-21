@@ -192,7 +192,7 @@ func TestDeployDigestDispatchCompatibility(t *testing.T) {
 // A real cold plan tests formatting separately from the frozen JSON disclosure,
 // including data deliberately containing the old spelling.
 func TestDeployWorkspacePlanCompatibility(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	root, _ := suiteEvalSource(t)
 	t.Chdir(root)
 	raw := strings.ReplaceAll(composedDestinationConfig, "registry.example/agents", "registry.example/lift")
@@ -245,7 +245,7 @@ func TestDeployWorkspacePlanCompatibility(t *testing.T) {
 }
 
 func TestDeployWorkspaceExecutionKeepsFrozenSelections(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	root, _ := suiteEvalSource(t)
 	t.Chdir(root)
 	path := filepath.Join(root, "kmx.yaml")

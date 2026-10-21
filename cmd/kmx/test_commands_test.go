@@ -139,7 +139,7 @@ func TestTestLegacyNoticeAtEveryNode(t *testing.T) {
 }
 
 func TestTestLegacyNoticeRequiredFlagsAndOfflineHelpers(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	root, output := suiteEvalSource(t)
 	for _, tail := range [][]string{
 		{"explain", "--clear"},
@@ -267,7 +267,7 @@ func TestTestLegacyNoticeMalformedContextAndOpaqueValues(t *testing.T) {
 }
 
 func TestTestEvaluationJSONAndRecoveryCompatibility(t *testing.T) {
-	t.Setenv("KMX_HOME", t.TempDir())
+	t.Setenv("KMX_HOME", privateTestStateDir(t))
 	root, _ := suiteEvalSource(t)
 	var legacyJSON []byte
 	for _, verb := range []string{"eval", "test"} {
@@ -295,7 +295,7 @@ func TestTestEvaluationJSONAndRecoveryCompatibility(t *testing.T) {
 		} else if !bytes.Equal(legacyJSON, out.Bytes()) {
 			t.Fatalf("machine JSON changed: legacy=%s canonical=%s", legacyJSON, &out)
 		}
-		wantCommand := "KIND_CLUSTER=demo CONTAINER_ENGINE=podman '/build with space/kmx' --container-engine podman " + verb + " --workspace " + root + " --to-context eval --inference provider:eval -o json"
+		wantCommand := "KIND_CLUSTER=demo CONTAINER_ENGINE=podman '/build with space/kmx' --container-engine podman " + verb + " --workspace " + quoteShell(root) + " --to-context eval --inference provider:eval -o json"
 		if operation.InvocationCommand != wantCommand || operation.TestPresentation != (verb == "test") {
 			t.Fatalf("%s recovery rewrote opaque values/invoked route or lost presentation selection: %s test=%v", verb, operation.InvocationCommand, operation.TestPresentation)
 		}

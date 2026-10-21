@@ -8,18 +8,18 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
-	"golang.org/x/sys/unix"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/fileaccess"
 )
 
 func failureStoreFixture(t *testing.T) (string, suiteFailureDetail) {
 	t.Helper()
-	t.Setenv("KMX_HOME", filepath.Join(t.TempDir(), "state"))
+	// privateSuiteDir is t.TempDir on Unix and a protected private directory on
+	// Windows, whose state root must already be private.
+	t.Setenv("KMX_HOME", filepath.Join(privateSuiteDir(t), "state"))
 	root := t.TempDir()
 	frame, obs := failureDetailFixture("fictional answer")
 	d := *captureSuiteFailure(frame, obs, "fictional answer", nil, nil)
@@ -87,7 +87,7 @@ func TestSuiteFailureStoreInterruptedWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := filepath.Join(path, ".pending")
-	if err := os.WriteFile(pending, []byte(`{"partial`), 0600); err != nil {
+	if err := fileaccess.WritePrivateFile(pending, []byte(`{"partial`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	s, err = openSuiteFailureStore(root, false)
@@ -125,34 +125,6 @@ func TestSuiteFailureStoreInterruptedWrite(t *testing.T) {
 	}
 }
 
-func TestSuiteFailureStorePublicationUncertainty(t *testing.T) {
-	root, d := failureStoreFixture(t)
-	s, err := openSuiteFailureStore(root, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.rename = func(from, to string) error {
-		if err := s.root.Rename(from, to); err != nil {
-			return err
-		}
-		return s.root.Close()
-	}
-	id, err := s.save(t.Context(), d)
-	_ = s.Close() // The injected failure already closed the root handle.
-	if !suiteFailureID.MatchString(id) || !errors.Is(err, errSuiteFailureStore) {
-		t.Fatal("visible publication lost its ID", id, err)
-	}
-	fresh, err := openSuiteFailureStore(root, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer fresh.Close()
-	entries, err := fresh.scan()
-	if err != nil || len(entries) != 1 || entries[0].record.Detail.ID != id {
-		t.Fatal("published record lost", err)
-	}
-}
-
 func TestSuiteFailureStoreCapacityWriteFailure(t *testing.T) {
 	root, d := failureStoreFixture(t)
 	var first string
@@ -186,7 +158,7 @@ func TestSuiteFailureStoreCapacityWriteFailure(t *testing.T) {
 }
 
 func TestSuiteFailureStoreAtomicErrors(t *testing.T) {
-	for _, mode := range []string{"short-write", "close", "rename"} {
+	for _, mode := range []string{"short-write", "file-sync", "close", "publish"} {
 		t.Run(mode, func(t *testing.T) {
 			root, d := failureStoreFixture(t)
 			s, err := openSuiteFailureStore(root, true)
@@ -197,10 +169,13 @@ func TestSuiteFailureStoreAtomicErrors(t *testing.T) {
 			switch mode {
 			case "short-write":
 				s.writeFile = func(f *os.File, b []byte) (int, error) { return f.Write(b[:1]) }
+			case "file-sync":
+				// A real flush failure on the stage handle must stop before publication.
+				s.syncFile = func(f *os.File) error { _ = f.Close(); return f.Sync() }
 			case "close":
 				s.closeFile = func(f *os.File) error { _ = f.Close(); return io.ErrClosedPipe }
-			case "rename":
-				s.rename = func(string, string) error { return io.ErrUnexpectedEOF }
+			case "publish":
+				s.publish = func(string, string) error { return io.ErrUnexpectedEOF }
 			}
 			if _, err := s.save(context.Background(), d); err == nil {
 				t.Fatal("fault accepted")
@@ -209,12 +184,59 @@ func TestSuiteFailureStoreAtomicErrors(t *testing.T) {
 			if err != nil || len(entries) != 0 {
 				t.Fatal("partial publication or leftover stage", entries, err)
 			}
+			if pending, err := s.pending(); err != nil || pending != nil {
+				t.Fatal("failed operation left its stage", pending, err)
+			}
 		})
 	}
 }
 
+// A directory flush failure after publication keeps the visible record's ID and
+// reports uncertainty; the complete record and no stage remain.
+func TestSuiteFailureStoreDirectorySyncUncertainty(t *testing.T) {
+	root, d := failureStoreFixture(t)
+	s, err := openSuiteFailureStore(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := false
+	publish := s.publish
+	s.publish = func(from, to string) error {
+		err := publish(from, to)
+		published = err == nil
+		return err
+	}
+	s.syncDirectory = func(f *os.File) error {
+		if !published {
+			t.Error("directory flushed before publication")
+		}
+		_ = f.Close()
+		return f.Sync()
+	}
+	id, err := s.save(t.Context(), d)
+	if closeErr := s.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if !suiteFailureID.MatchString(id) || !errors.Is(err, errSuiteFailureStore) {
+		t.Fatal("post-publication flush failure lost its ID or was hidden", id, err)
+	}
+	fresh, err := openSuiteFailureStore(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fresh.Close()
+	entries, err := fresh.scan()
+	if err != nil || len(entries) != 1 || entries[0].record.Detail.ID != id {
+		t.Fatal("published record lost or incomplete", entries, err)
+	}
+	if pending, err := fresh.pending(); err != nil || pending != nil {
+		t.Fatal("published stage remains", pending, err)
+	}
+}
+
 func TestSuiteFailureStoreUnsafe(t *testing.T) {
-	for _, mode := range []string{"symlink", "fifo", "mode", "hardlink", "oversize", "corrupt", "duplicate", "missing-state", "inconsistent-state", "identity-controls", "invalid-utf8", "pending-mode", "pending-link", "pending-fifo", "unknown", "lock", "directory"} {
+	modes := []string{"hardlink", "oversize", "corrupt", "duplicate", "missing-state", "inconsistent-state", "identity-controls", "invalid-utf8", "unknown"}
+	for _, mode := range append(modes, suiteFailurePlatformUnsafeModes...) {
 		t.Run(mode, func(t *testing.T) {
 			root, d := failureStoreFixture(t)
 			id, err := saveSuiteFailure(context.Background(), root, d)
@@ -235,14 +257,6 @@ func TestSuiteFailureStoreUnsafe(t *testing.T) {
 				t.Fatal(err)
 			}
 			switch mode {
-			case "symlink":
-				_ = os.Remove(target)
-				err = os.Symlink(filepath.Join(t.TempDir(), "outside"), target)
-			case "fifo":
-				_ = os.Remove(target)
-				err = unix.Mkfifo(target, 0600)
-			case "mode":
-				err = os.Chmod(target, 0644)
 			case "hardlink":
 				err = os.Link(target, filepath.Join(t.TempDir(), "copy"))
 			case "oversize", "corrupt", "inconsistent-state", "invalid-utf8":
@@ -260,7 +274,7 @@ func TestSuiteFailureStoreUnsafe(t *testing.T) {
 				case "invalid-utf8":
 					raw = bytes.Replace(raw, []byte("fictional"), []byte{0xff}, 1)
 				}
-				err = os.WriteFile(target, raw, 0600)
+				err = fileaccess.WritePrivateFile(target, raw, 0600)
 			case "duplicate", "missing-state":
 				raw, e := os.ReadFile(target)
 				if e != nil {
@@ -271,7 +285,7 @@ func TestSuiteFailureStoreUnsafe(t *testing.T) {
 				} else {
 					raw = bytes.Replace(raw, []byte(`"complete":true,`), nil, 1)
 				}
-				err = os.WriteFile(target, raw, 0600)
+				err = fileaccess.WritePrivateFile(target, raw, 0600)
 			case "identity-controls":
 				raw, e := os.ReadFile(target)
 				if e != nil {
@@ -286,22 +300,11 @@ func TestSuiteFailureStoreUnsafe(t *testing.T) {
 				if e != nil {
 					t.Fatal(e)
 				}
-				err = os.WriteFile(target, raw, 0600)
-			case "pending-mode":
-				pending := filepath.Join(path, suiteFailurePendingName)
-				if err = os.WriteFile(pending, nil, 0600); err == nil {
-					err = os.Chmod(pending, 0644)
-				}
-			case "pending-link":
-				err = os.Symlink(target, filepath.Join(path, suiteFailurePendingName))
-			case "pending-fifo":
-				err = unix.Mkfifo(filepath.Join(path, suiteFailurePendingName), 0600)
+				err = fileaccess.WritePrivateFile(target, raw, 0600)
 			case "unknown":
-				err = os.WriteFile(filepath.Join(path, "unrelated"), []byte("keep"), 0600)
-			case "lock":
-				err = os.Chmod(filepath.Join(path, "lock"), 0644)
-			case "directory":
-				err = os.Chmod(path, 0755)
+				err = fileaccess.WritePrivateFile(filepath.Join(path, "unrelated"), []byte("keep"), 0600)
+			default:
+				err = applySuiteFailurePlatformUnsafe(t, mode, path, target)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -313,28 +316,6 @@ func TestSuiteFailureStoreUnsafe(t *testing.T) {
 				t.Fatal("refusal removed target", err)
 			}
 		})
-	}
-}
-
-type suiteFailureForeignInfo struct {
-	os.FileInfo
-	stat syscall.Stat_t
-}
-
-func (i suiteFailureForeignInfo) Sys() any { return &i.stat }
-func TestSuiteFailureStoreOwnership(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "owned")
-	if err := os.WriteFile(path, []byte("x"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stat := *info.Sys().(*syscall.Stat_t)
-	stat.Uid++
-	if safeSuiteFailureFile(suiteFailureForeignInfo{info, stat}) {
-		t.Fatal("foreign-owner file accepted")
 	}
 }
 
@@ -362,7 +343,7 @@ func TestSuiteFailureStoreClearAndLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	unrelated := filepath.Join(os.Getenv("KMX_HOME"), "passing")
-	if err := os.WriteFile(unrelated, []byte("not diagnostics"), 0600); err != nil {
+	if err := fileaccess.WritePrivateFile(unrelated, []byte("not diagnostics"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := clearSuiteFailures(context.Background(), root, first); err != nil || n != 1 {
@@ -378,25 +359,6 @@ func TestSuiteFailureStoreClearAndLock(t *testing.T) {
 		t.Fatal("clear reached passing state", err)
 	}
 	_ = second
-}
-
-func TestSuiteFailureStorePermissions(t *testing.T) {
-	if mode := os.Getenv("KMX_FAILURE_UMASK"); mode != "" {
-		mask := 0077
-		if mode == "022" {
-			mask = 0022
-		}
-		unix.Umask(mask)
-		TestSuiteFailureStoreRetention(t)
-		return
-	}
-	for _, mode := range []string{"077", "022"} {
-		cmd := exec.Command(os.Args[0], "-test.run=^TestSuiteFailureStorePermissions$", "-test.count=1")
-		cmd.Env = append(os.Environ(), "KMX_FAILURE_UMASK="+mode)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("umask%s: %s %v", mode, out, err)
-		}
-	}
 }
 
 func TestSuiteFailureStoreClippingPrivacy(t *testing.T) {
@@ -488,15 +450,13 @@ func TestSuiteFailureStoreRetention(t *testing.T) {
 			t.Fatal("failure record accepted as passing evidence")
 		}
 		info, err := store.root.Lstat(entry.name)
-		if err != nil || info.Mode().Perm() != 0600 || info.Size() > maxSuiteFailureRecordBytes {
+		if err != nil || info.Size() > maxSuiteFailureRecordBytes {
 			t.Fatal("unsafe retained file", info, err)
 		}
+		requireSuiteFailurePrivateFile(t, filepath.Join(store.path, entry.name))
 	}
 	if len(digests) != 2 {
 		t.Fatal("revision change reset history")
 	}
-	info, err := os.Stat(store.path)
-	if err != nil || info.Mode().Perm() != 0700 {
-		t.Fatal("unsafe partition", err)
-	}
+	requireSuiteFailurePrivateDirectory(t, store.path)
 }

@@ -90,7 +90,7 @@ jobs:
       - name: Native local storage and publication safety
         shell: pwsh
         run: |
-          & "$env:RUNNER_TEMP\kmx-windows-tests.exe" go test -count=1 -timeout=600s -run '^TestWindows|^TestBuildSuite|^TestWriteNewRefusesToClobber|^TestSuitePassingExportRawPublicationOrder$|^TestSuitePassingExportDirectorySyncFailureAfterLink$|^TestSuitePassingExportFileSyncFailureBeforePublication$' ./internal/kmx/app ./internal/kmx/agentsuite/workspace ./internal/kmx/agentsuite/localartifact ./internal/kmx/agentsuite/oras ./internal/kmx/scaffold
+          & "$env:RUNNER_TEMP\kmx-windows-tests.exe" go test -count=1 -timeout=600s -run '^TestWindows|^TestSuiteFailureStore|^TestSuiteFailureExplain|^TestSuiteFailureJudge|^TestBuildSuite|^TestWriteNewRefusesToClobber|^TestSuitePassingExportRawPublicationOrder$|^TestSuitePassingExportDirectorySyncFailureAfterLink$|^TestSuitePassingExportFileSyncFailureBeforePublication$' ./internal/kmx/app ./internal/kmx/agentsuite/workspace ./internal/kmx/agentsuite/localartifact ./internal/kmx/agentsuite/oras ./internal/kmx/scaffold
           exit $LASTEXITCODE
       - name: Build native CLI
         shell: pwsh
