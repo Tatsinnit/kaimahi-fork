@@ -1524,7 +1524,7 @@ Normal generated native packages already used non-executable regular files, so
 this cache-format upgrade preserves their artifact S and authored fingerprint.
 Repreparation with the same S retains eligible exact-S managed, explicit and
 public proof. If S changes, previous proof cannot qualify the new artifact:
-rerun `kmx eval` before evaluated `kmx push`, and obtain fresh approval/signing
+rerun `kmx test` before evaluated `kmx push`, and obtain fresh approval/signing
 where required. An explicit mismatched `--evaluation` refuses without falling
 back; managed lookup considers only the new exact-S partition. Source-free digest
 Lift still consumes the original artifact and its matching receipt, without
