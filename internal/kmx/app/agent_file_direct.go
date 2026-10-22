@@ -12,23 +12,29 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentfile"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentpreview"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/modelaccess"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/modelaccess/copilot"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/runtime"
 )
 
-// NewDirectFileRunner is the temporary, unjournaled demo adapter. Remove this
-// implementation and constructor wiring when the embedded Sessions runner lands.
-// Its single-sample judgments are local preview only, never native evidence.
+// NewDirectFileRunner is the unjournaled adapter used when the agent or judge
+// selects Copilot. Its credential-owning transport has no pre-journal content
+// check. Single-sample judgments are local preview only, never native evidence.
 func NewDirectFileRunner() agentpreview.Runner {
-	return &directFileRunner{}
+	return &directFileRunner{copilot: copilot.New(nil)}
 }
 
-type directFileRunner struct{}
+type directFileRunner struct {
+	copilot interface {
+		Client(context.Context, modelaccess.Route) (http.RoundTripper, error)
+	}
+}
 
 var _ agentpreview.Runner = (*directFileRunner)(nil)
 var errDirectPreview = errors.New("direct preview execution unavailable")
@@ -69,8 +75,11 @@ func (d *directFileRunner) Run(ctx context.Context, r agentpreview.Request) (age
 	if r.JudgeRoute != nil {
 		judge = *r.JudgeRoute
 	}
-	client, err := d.client(r.Route)
+	client, err := d.client(ctx, r.Route)
 	if err != nil {
+		if traceErr := r.Report("Route unavailable: model access could not be established"); traceErr != nil {
+			return abort(traceErr)
+		}
 		return abort(err)
 	}
 	judgeClient := client
@@ -86,7 +95,7 @@ func (d *directFileRunner) Run(ctx context.Context, r agentpreview.Request) (age
 		}
 	}
 	if hasJudge && judge != r.Route {
-		judgeClient, err = d.client(judge)
+		judgeClient, err = d.client(ctx, judge)
 		if err != nil {
 			return abort(err)
 		}
@@ -100,29 +109,37 @@ func (d *directFileRunner) Run(ctx context.Context, r agentpreview.Request) (age
 		instructions = directFakeInstructions(r.Agent)
 	}
 	runID := uuid.NewString()
-	complete := func(id, input string) (agentpreview.Completion, error) {
+	complete := func(id, label, input string) (agentpreview.Completion, error) {
 		if ctx.Err() != nil {
 			return agentpreview.Completion{}, ctx.Err()
 		}
-		body, err := d.send(ctx, client, r.Route, instructions, input, false)
+		body, err := d.send(ctx, client, r.Route, instructions, input, false, r, label)
 		if err != nil {
 			return agentpreview.Completion{}, err
 		}
 		answer, ok := parseDirectCompletion(body, r.Route.Model)
 		if !ok {
+			reason := "invalid_completion"
+			var identity struct{ Model string }
+			if json.Unmarshal(body, &identity) == nil && identity.Model != "" && identity.Model != r.Route.Model {
+				reason = "model_mismatch"
+			}
+			if err := r.Report("Completion %s refused: %s", label, reason); err != nil {
+				return agentpreview.Completion{}, err
+			}
 			return agentpreview.Completion{}, errDirectPreview
 		}
 		return agentpreview.Completion{State: agentpreview.Complete, ID: runID + "/" + id, FileRevision: r.Agent.Revision, Provider: r.Route.Provider, Model: r.Route.Model, Answer: answer}, nil
 	}
 	if r.Input != nil {
-		c, err := complete("ad-hoc", *r.Input)
+		c, err := complete("ad-hoc", "ad-hoc", *r.Input)
 		out.AdHoc = &c
 		if err != nil {
 			return abort(err)
 		}
 	}
 	for i, ex := range r.Examples {
-		completion, err := complete(fmt.Sprint(i), ex.Input)
+		completion, err := complete(fmt.Sprint(i), ex.ID, ex.Input)
 		if err != nil {
 			return abort(err)
 		}
@@ -142,17 +159,23 @@ func (d *directFileRunner) Run(ctx context.Context, r agentpreview.Request) (age
 				Answer string `json:"answer"`
 				Rubric string `json:"rubric"`
 			}{ex.Input, completion.Answer, a.Rubric})
-			body, err := d.send(ctx, judgeClient, judge, directJudgePolicy, string(data), true)
+			body, err := d.send(ctx, judgeClient, judge, directJudgePolicy, string(data), true, r, ex.ID+"/"+a.ID)
 			if ctx.Err() != nil {
 				return abort(ctx.Err())
 			}
-			// A judge error/malformed response is an unknown check, never a retry or a
-			// native EvaluationJudgeEvidence with a fabricated second score.
+			// Copilot transport failures stop later sends. Local judge failures and
+			// malformed replies remain unknown, never retries or native evidence.
 			if err != nil {
+				if judge.Provider == "copilot" || errors.Is(err, agentpreview.ErrDiagnosticsFailed) {
+					return abort(err)
+				}
 				continue
 			}
 			score, _, _, ok := parseEvaluationJudgeResponse(body, judge.Model, a.JudgeVersion, "")
 			if !ok {
+				if err := r.Report("Judge %s/%s: invalid or mismatched response (unknown)", ex.ID, a.ID); err != nil {
+					return abort(err)
+				}
 				continue
 			}
 			if score >= *a.MinScore {
@@ -169,12 +192,25 @@ func (d *directFileRunner) Run(ctx context.Context, r agentpreview.Request) (age
 	return out, nil
 }
 
-func (d *directFileRunner) client(r modelaccess.Route) (*http.Client, error) {
+func (d *directFileRunner) client(ctx context.Context, r modelaccess.Route) (*http.Client, error) {
 	if r.Validate() != nil || (r.Provider == "fake") != (r.Model == "fake") {
 		return nil, agentpreview.ErrModelUnavailable
 	}
 	if r.Provider == "fake" {
 		return nil, nil
+	}
+	if r.Provider == "copilot" {
+		if d.copilot == nil {
+			return nil, agentpreview.ErrModelUnavailable
+		}
+		transport, err := d.copilot.Client(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		if transport == nil {
+			return nil, copilot.ErrUnavailable
+		}
+		return &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, nil
 	}
 	if r.Provider != "compatible" && r.Provider != "ollama" && r.Provider != "foundry-local" {
 		return nil, agentpreview.ErrModelUnavailable
@@ -191,7 +227,48 @@ func (d *directFileRunner) client(r modelaccess.Route) (*http.Client, error) {
 	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true, ResponseHeaderTimeout: 30 * time.Second, MaxResponseHeaderBytes: 16 * 1024, TLSHandshakeTimeout: 10 * time.Second}
 	return &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, nil
 }
-func (d *directFileRunner) send(ctx context.Context, client *http.Client, r modelaccess.Route, system, input string, judge bool) ([]byte, error) {
+func (d *directFileRunner) send(ctx context.Context, client *http.Client, r modelaccess.Route, system, input string, judge bool, progress agentpreview.Request, id string) (body []byte, err error) {
+	kind := "Completion"
+	if judge {
+		kind = "Judge"
+	}
+	endpoint := "in-process"
+	if r.Provider != "fake" {
+		u, parseErr := url.Parse(r.Endpoint)
+		if parseErr != nil {
+			return nil, errDirectPreview
+		}
+		endpoint = u.Scheme + "://" + u.Host
+		switch u.Path {
+		case "", "/", "/v1", "/v1/":
+			endpoint += u.Path
+		default:
+			endpoint += "/[path withheld]"
+		}
+	}
+	if err := progress.Report("%s %s started: provider=%s endpoint=%s", kind, id, r.Provider, endpoint); err != nil {
+		return nil, err
+	}
+	start := time.Now()
+	status := 0
+	reason := "complete"
+	defer func() {
+		if err != nil && reason == "complete" {
+			reason = "execution_failed"
+			if errors.Is(err, context.Canceled) {
+				reason = "cancelled"
+			} else if errors.Is(err, context.DeadlineExceeded) {
+				reason = "deadline_exceeded"
+			}
+		}
+		httpStatus := ""
+		if status != 0 {
+			httpStatus = fmt.Sprintf(" HTTP=%d", status)
+		}
+		if traceErr := progress.Report("%s %s finished: %s%s elapsed=%s", kind, id, reason, httpStatus, time.Since(start).Round(time.Millisecond)); traceErr != nil {
+			body, err = nil, traceErr
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -211,28 +288,50 @@ func (d *directFileRunner) send(ctx context.Context, client *http.Client, r mode
 		return nil, errDirectPreview
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
 	response, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		if r.Provider == "copilot" {
+			if code := previewCopilotFailure(err); code != "" {
+				reason = code
+			}
+			return nil, err
+		}
+		var networkErr net.Error
+		switch {
+		case errors.Is(err, syscall.ECONNREFUSED):
+			reason = "connection_refused"
+		case errors.As(err, &networkErr) && networkErr.Timeout():
+			reason = "response_timeout"
+		default:
+			reason = "transport_error"
+		}
 		return nil, errDirectPreview
 	}
 	defer response.Body.Close()
+	status = response.StatusCode
 	if response.StatusCode != http.StatusOK {
+		reason = "http_error"
 		return nil, errDirectPreview
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, 1024*1024+1))
+	body, err = io.ReadAll(io.LimitReader(response.Body, 1024*1024+1))
 	if err != nil || len(body) > 1024*1024 {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		reason = "unreadable_or_oversized_response"
+		if r.Provider == "copilot" && err != nil {
+			return nil, err
 		}
 		return nil, errDirectPreview
 	}
 	return body, nil
 }
 func parseDirectCompletion(body []byte, model string) (string, bool) {
-	if !evaluationJudgeJSONUnique(body) {
+	if !runtime.JSONKeysUnique(body) {
 		return "", false
 	}
 	var envelope struct {

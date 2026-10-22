@@ -68,13 +68,18 @@ kmx
 read-only reference extraction/export helpers. Cobra also supplies `help`.
 
 Unreleased `model list` defaults to local discovery; explicit Copilot listing
-requires existing kmx-owned auth and never starts sign-in. `model login` uses
-GitHub device flow; `--gh` explicitly opts into private bounded gh token capture.
-`model logout` deletes only kmx's OS keychain item and clears memory. Native
-keychain storage has no plaintext fallback. Internal
+uses explicit `COPILOT_GITHUB_TOKEN`, otherwise kmx's keychain item or an existing
+gh login when the keychain is unavailable. It never starts sign-in or saves
+runtime tokens. `model login` uses GitHub device flow; `--gh` explicitly copies
+bounded private gh output to the OS keychain. Without a usable keychain, login
+explains runtime options instead. `model logout` clears only kmx's item/memory,
+not gh or environment credentials. There is no plaintext token-file fallback. Internal
 `modelaccess/copilot.New(Store).Client(ctx, Route)` returns an authenticated
-selected-route RoundTripper for direct Chat Completions JSON/SSE, not a runner
-or proxy. No inference replay, model substitution or persisted selection. See
+selected-route RoundTripper for direct Chat Completions JSON/SSE, not a proxy.
+Markdown-file Run/Test and shared MCP execution consume it only with explicit
+`--provider copilot`, prior sign-in and an exact authored model; the Copilot
+endpoint is fixed. This remains tool-free, no-journal preview, not a new harness.
+No inference replay, model substitution or persisted selection. See
 [direct model access](copilot-inference.md#direct-model-access). Native package
 tests do not qualify the full Windows CLI.
 
@@ -177,7 +182,8 @@ and retains its own alpha lifecycle area:
 
 1. `github.com/agent-primitives/suite` is the separate portable format module:
    model, media types, canonical JSON, schemas, offline validation and semantic
-   diff. Consumers import it explicitly as `agentsuite`.
+   diff. Consumers import focused `core`, `oci`, `evidence` and
+   `experimental/flow` packages, not its deprecated root.
 2. `pkg/suiteview/` is a concrete local OCI layout/archive loader for one
    explicit member. It returns copied instructions, the complete portable model
    requirement and exact artifact/graph/member/instruction identities with typed

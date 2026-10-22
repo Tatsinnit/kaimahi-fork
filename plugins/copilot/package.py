@@ -17,6 +17,9 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 TARGETS = {"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64"}
 MAX_BINARY = 512 << 20
+NATIVE_DIRECTORY = "com.github.copilot/extensions/agent-view"
+NATIVE_FILES = tuple(f"{NATIVE_DIRECTORY}/{name}" for name in
+                     ("extension.mjs", "view.mjs", "index.html", "app.js", "style.css"))
 
 
 def _quarantine(path: Path) -> None:
@@ -40,7 +43,7 @@ def _write_json(path: Path, value: dict) -> None:
     path.chmod(0o600)
 
 
-def build(*, binary: Path, sha256: str, target: str, root: Path,
+def build(*, binary: Path, sha256: str, target: str, root: Path | None,
           output: Path, version: str) -> Path:
     """Copy exactly the caller-pinned bytes without running the supplied engine.
 
@@ -54,19 +57,20 @@ def build(*, binary: Path, sha256: str, target: str, root: Path,
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?", version):
         raise ValueError("invalid plugin version")
     try:
-        root = root.resolve(strict=True)
+        root = root.resolve(strict=True) if root is not None else None
         parent = output.parent.resolve(strict=True)
     except OSError as exc:
         raise ValueError("root must be an existing directory; output parent must exist") from exc
-    if not root.is_dir():
-        raise ValueError("root must be an existing directory")
-    if root == Path(root.anchor):
-        raise ValueError("refusing filesystem root as operation root")
-    if any(ord(c) < 32 for c in str(root)):
-        raise ValueError("root cannot contain control characters")
-    # Hosts expand these exact tokens in args; a literal root must stay literal.
-    if any(token in str(root) for token in ("${PLUGIN_ROOT}", "${PLUGIN_DATA}")):
-        raise ValueError("root cannot contain plugin placeholders")
+    if root is not None:
+        if not root.is_dir():
+            raise ValueError("root must be an existing directory")
+        if root == Path(root.anchor):
+            raise ValueError("refusing filesystem root as operation root")
+        if any(ord(c) < 32 for c in str(root)):
+            raise ValueError("root cannot contain control characters")
+        # Hosts expand these exact tokens in args; a literal root must stay literal.
+        if any(token in str(root) for token in ("${PLUGIN_ROOT}", "${PLUGIN_DATA}")):
+            raise ValueError("root cannot contain plugin placeholders")
     output = parent / output.name
     if os.path.lexists(output):
         raise ValueError("output already exists; refusing replacement")
@@ -90,7 +94,8 @@ def build(*, binary: Path, sha256: str, target: str, root: Path,
     manifest["version"] = version
     name = "kmx.exe" if target.startswith("windows/") else "kmx"
     server["command"] = "./bin/" + name
-    server["args"][-1] = str(root)
+    selected_root = str(root) if root is not None else "__SELECTED_ROOT__"
+    server["args"][-1] = selected_root
     # Hash and stage the same bytes, avoiding a second read of mutable input.
     with tempfile.TemporaryFile() as staged:
         digest = hashlib.sha256()
@@ -122,7 +127,7 @@ def build(*, binary: Path, sha256: str, target: str, root: Path,
             destination.chmod(0o700)
             _write_json(output / "plugin.json", manifest)
             _write_json(output / "mcp.json", config)
-            _write_json(output / "selected-root.json", {"root": str(root)})
+            _write_json(output / "selected-root.json", {"root": selected_root})
             _write_json(output / "engine.json", {
                 "schemaVersion": 1, "sha256": sha256, "platform": target,
                 "purpose": "development-fixture; not a signed release",
@@ -131,6 +136,14 @@ def build(*, binary: Path, sha256: str, target: str, root: Path,
             skill.mkdir(parents=True, mode=0o700)
             shutil.copyfile(HERE / "skills/kmx-agent-builder/SKILL.md", skill / "SKILL.md")
             (skill / "SKILL.md").chmod(0o600)
+            for name in NATIVE_FILES:
+                source = HERE / name
+                if source.is_symlink() or not source.is_file() or not 0 < source.stat().st_size <= 65536:
+                    raise ValueError("native canvas assets must be bounded regular files")
+                destination = output / name
+                destination.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+                shutil.copyfile(source, destination)
+                destination.chmod(0o600)
         except Exception:
             shutil.rmtree(output)
             raise

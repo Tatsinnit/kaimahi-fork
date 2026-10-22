@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentpreview"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/app"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/modelaccess"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/modelaccess/copilot"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/runtime"
 )
 
@@ -69,6 +72,7 @@ func TestFileCommandsAgainstRunnerInterface(t *testing.T) {
 			if op == "run" {
 				args = append(args, "--prompt", "ad-hoc")
 			}
+
 			if err := execute(args, deps); err != nil {
 				t.Fatal(err)
 			}
@@ -91,6 +95,79 @@ func TestFileCommandsAgainstRunnerInterface(t *testing.T) {
 		})
 	}
 }
+func TestFileCommandsCopilotRoute(t *testing.T) {
+	for _, operation := range []string{"run", "test"} {
+		for _, endpoint := range []string{"", modelaccess.CopilotEndpoint, "https://private.invalid"} {
+			t.Run(operation+"/"+endpoint, func(t *testing.T) {
+				path := cliPreviewFile(t)
+				source, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, bytes.ReplaceAll(source, []byte("**Preferred:** fake"), []byte("**Preferred:** gpt-test")), 0600); err != nil {
+					t.Fatal(err)
+				}
+				var out, diag bytes.Buffer
+				deps, loads := testDependencies(&out, &diag)
+				runner := &cliPreviewFake{verdict: runtime.EvaluationPass}
+				deps.fileRunner = runner
+				args := []string{operation, path, "--provider", "copilot", "-o", "json"}
+				if endpoint != "" {
+					args = append(args, "--endpoint", endpoint)
+				}
+				err = execute(args, deps)
+				if endpoint == "https://private.invalid" {
+					if err == nil || runner.calls != 0 || strings.Contains(out.String()+diag.String(), endpoint) {
+						t.Fatalf("unsafe endpoint: %v / %s", err, out.String())
+					}
+					return
+				}
+				want := modelaccess.Route{Provider: "copilot", Model: "gpt-test", Endpoint: modelaccess.CopilotEndpoint, Auth: "copilot"}
+				if err != nil || runner.calls != 1 || runner.request.Route != want || *loads != 0 {
+					t.Fatalf("route=%+v err=%v calls=%d config=%d", runner.request.Route, err, runner.calls, *loads)
+				}
+				var result app.FilePreviewResult
+				if err := json.Unmarshal(out.Bytes(), &result); err != nil || !result.FullPass {
+					t.Fatalf("invalid JSON result: %s / %v", out.String(), err)
+				}
+			})
+		}
+	}
+}
+
+func TestFileCommandsCopilotFailures(t *testing.T) {
+	for _, operation := range []string{"run", "test"} {
+		for _, output := range []string{"text", "json"} {
+			t.Run(operation+"/"+output, func(t *testing.T) {
+				path := cliPreviewFile(t)
+				source, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, bytes.ReplaceAll(source, []byte("**Preferred:** fake"), []byte("**Preferred:** gpt-test")), 0600); err != nil {
+					t.Fatal(err)
+				}
+				var out, diag bytes.Buffer
+				deps, _ := testDependencies(&out, &diag)
+				deps.fileRunner = &cliPreviewFake{cause: errors.Join(copilot.ErrAuthRequired, errors.New("PRIVATE AUTH CAUSE"))}
+				err = execute([]string{operation, path, "--provider", "copilot", "-o", output}, deps)
+				if err == nil {
+					t.Fatal("authentication failure succeeded")
+				}
+				if text := out.String() + diag.String() + err.Error(); !strings.Contains(text, "copilot_auth_required") || strings.Contains(text, "PRIVATE") {
+					t.Fatalf("unsafe or unclassified error: %s", text)
+				}
+				if output == "json" {
+					var result app.FilePreviewResult
+					if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.ReasonCode != "copilot_auth_required" || result.FullPass {
+						t.Fatalf("invalid failure JSON: %s / %v", out.String(), err)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestFileCommandExitCodes(t *testing.T) {
 	for _, tc := range []struct {
 		verdict runtime.EvaluationVerdict
@@ -137,6 +214,8 @@ func TestFileCommandsRefuseMixedModesBeforeConfig(t *testing.T) {
 		{"eval", "FILE"},
 		{"test", "--case", "greeting"},
 		{"run", "--agent", "live", "--prompt", "x", "--case", "greeting"},
+		{"run", "--agent", "live", "--prompt", "x", "--verbose"},
+		{"test", "--verbose"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			path := cliPreviewFile(t)
@@ -167,7 +246,8 @@ func TestFileCommandRequiresWiredRunner(t *testing.T) {
 		t.Fatalf("%v / %s", err, out.String())
 	}
 }
-func TestFileCommandDirectPreviewDemo(t *testing.T) {
+func TestFileCommandJournaledPreviewDemo(t *testing.T) {
+	t.Setenv("KMX_HOME", t.TempDir())
 	path := cliPreviewFile(t)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -190,7 +270,7 @@ func TestFileCommandDirectPreviewDemo(t *testing.T) {
 			if decodeErr := json.Unmarshal(out.Bytes(), &r); decodeErr != nil {
 				t.Fatal(decodeErr)
 			}
-			if (err != nil) != broken || r.FullPass == broken || r.Runner != "preview runner (no journal)" || *loads != 0 {
+			if (err != nil) != broken || r.FullPass == broken || strings.Contains(r.Runner, "no journal") || *loads != 0 {
 				t.Fatalf("broken=%v: %+v / %v", broken, r, err)
 			}
 		}
@@ -204,6 +284,68 @@ func TestFilePreviewOutputWriteFailure(t *testing.T) {
 	deps.fileRunner = &cliPreviewFake{verdict: runtime.EvaluationPass}
 	if err := execute([]string{"test", cliPreviewFile(t), "-o", "json"}, deps); err == nil || exitCode(err) != 1 {
 		t.Fatalf("write failure: %v", err)
+	}
+}
+
+func TestFilePreviewVerboseStderrOnly(t *testing.T) {
+	t.Setenv("KMX_HOME", t.TempDir())
+	for _, op := range []string{"run", "test"} {
+		for _, verbose := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/%v", op, verbose), func(t *testing.T) {
+				path := cliPreviewFile(t)
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, bytes.ReplaceAll(data, []byte("Greet the input."), []byte("Reply with exactly `PRIVATE OPERAND`.")), 0600); err != nil {
+					t.Fatal(err)
+				}
+				var out, diag bytes.Buffer
+				deps, loads := testDependencies(&out, &diag)
+				args := []string{op, path, "-o", "json"}
+				if verbose {
+					args = append(args, "--verbose")
+				}
+				if op == "run" {
+					args = append(args, "--prompt", "PRIVATE PROMPT")
+				}
+				if err := execute(args, deps); err != nil {
+					t.Fatal(err)
+				}
+				var result app.FilePreviewResult
+				if err := json.Unmarshal(out.Bytes(), &result); err != nil || !result.FullPass || *loads != 0 {
+					t.Fatalf("invalid result: %v / %s; config=%d", err, out.String(), *loads)
+				}
+				if verbose {
+					for _, want := range []string{"Completion greeting started", "Completion greeting finished", "elapsed=", "Total elapsed="} {
+						if !strings.Contains(diag.String(), want) {
+							t.Fatalf("missing %q in diagnostics: %s", want, diag.String())
+						}
+					}
+					for _, duplicate := range []string{"Parsed agent", "revision=", "model=", "Runner:", "Assertion ", "Preview finished:", "checks_passed", "HTTP="} {
+						if strings.Contains(diag.String(), duplicate) {
+							t.Fatalf("duplicated summary %q in diagnostics: %s", duplicate, diag.String())
+						}
+					}
+				} else if strings.Contains(diag.String(), "[verbose]") {
+					t.Fatalf("unexpected diagnostics: %s", diag.String())
+				}
+				if strings.Contains(out.String()+diag.String(), "PRIVATE") || strings.Contains(diag.String(), path) {
+					t.Fatal("verbose disclosed source content or full path")
+				}
+			})
+		}
+	}
+}
+
+func TestFilePreviewVerboseWriteFailure(t *testing.T) {
+	var out, diag bytes.Buffer
+	deps, _ := testDependencies(&out, &diag)
+	deps.stderr = previewBrokenWriter{}
+	deps.fileRunner = app.NewDirectFileRunner()
+	err := execute([]string{"test", cliPreviewFile(t), "--verbose"}, deps)
+	if err == nil || !strings.Contains(err.Error(), "cannot write local preview diagnostics") || out.Len() != 0 {
+		t.Fatalf("diagnostic failure did not refuse: %v, stdout=%s", err, out.String())
 	}
 }
 
@@ -302,6 +444,13 @@ func TestFileHelpIsCanonicalOnly(t *testing.T) {
 				}
 			} else if !strings.Contains(strings.ToLower(out.String()), verb+" file") || !strings.Contains(out.String(), "--case") {
 				t.Fatalf("canonical file preview missing from %s help: %s", verb, out.String())
+			}
+			if verb != "eval" {
+				for _, disclosure := range []string{"cleartext SQLite journals", "local-preview/journals", "newest 20 runs", "active runs", "Stop previews", "agent or judge uses Copilot", "NoJournal"} {
+					if !strings.Contains(out.String(), disclosure) {
+						t.Errorf("%s help omits retention disclosure %q", verb, disclosure)
+					}
+				}
 			}
 			if *loads != 0 || fake.calls != 0 {
 				t.Fatal("help performed operations")

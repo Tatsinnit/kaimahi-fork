@@ -9,6 +9,7 @@ import (
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentfile"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentpreview"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/modelaccess"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/modelaccess/copilot"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/runtime"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/secretshapes"
 )
@@ -18,6 +19,7 @@ type FilePreviewOptions struct {
 	Route, JudgeRoute       *modelaccess.Route
 	Input                   *string
 	ShowContent             bool
+	Progress                func(string) error
 }
 
 type FilePreviewResult struct {
@@ -91,7 +93,36 @@ type FilePreviewError struct {
 func (e *FilePreviewError) Error() string { return previewReason(e.code) }
 func (e *FilePreviewError) ExitCode() int { return e.exit }
 
+var previewCopilotFailures = []struct {
+	err  error
+	code string
+}{
+	{copilot.ErrAuthRequired, "copilot_auth_required"},
+	{copilot.ErrAuthRevoked, "copilot_auth_revoked"},
+	{copilot.ErrSubscription, "copilot_no_subscription"},
+	{copilot.ErrPolicy, "copilot_policy_denied"},
+	{copilot.ErrQuota, "copilot_quota"},
+	{copilot.ErrModelUnavailable, "copilot_model_unavailable"},
+	{copilot.ErrMalformed, "copilot_malformed"},
+	{copilot.ErrKeychain, "copilot_keychain_unavailable"},
+	{copilot.ErrUnavailable, "copilot_unavailable"},
+}
+
+func previewCopilotFailure(err error) string {
+	for _, failure := range previewCopilotFailures {
+		if errors.Is(err, failure.err) {
+			return failure.code
+		}
+	}
+	return ""
+}
+
 func previewReason(code string) string {
+	for _, failure := range previewCopilotFailures {
+		if code == failure.code {
+			return failure.err.Error()
+		}
+	}
 	reasons := map[string]string{
 		"checks_passed": "All selected example assertions passed.", "assertion_satisfied": "Assertion satisfied.",
 		"completion_ready": "Attributable completion available.",
@@ -102,7 +133,8 @@ func previewReason(code string) string {
 		"model_unavailable":  "Selected model route is unavailable or does not match the file model; select an exact trusted route.",
 		"runner_unavailable": "Embedded preview runner is not available; no inference was performed.",
 		"execution_failed":   "Local preview execution failed.", "invalid_completion": "Runner returned incomplete or mismatched execution metadata.",
-		"journal_failed": "Preview journal finalization failed; the result is unknown.",
+		"diagnostics_failed": "Cannot write local preview diagnostics.",
+		"journal_failed":     "Preview journal finalization failed; the result is unknown.",
 	}
 	return reasons[code]
 }
@@ -225,7 +257,7 @@ func (a *App) previewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent,
 	if a.FileRunner == nil {
 		return fail("runner_unavailable", 1)
 	}
-	request := agentpreview.Request{Agent: parsed, Examples: selected, Route: route, JudgeRoute: opt.JudgeRoute, Input: opt.Input}
+	request := agentpreview.Request{Agent: parsed, Examples: selected, Route: route, JudgeRoute: opt.JudgeRoute, Input: opt.Input, Progress: opt.Progress}
 	outcome, cause := a.FileRunner.Run(ctx, request)
 	if outcome.NoJournal {
 		r.Runner = "preview runner (no journal)"
@@ -282,6 +314,9 @@ func (a *App) previewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent,
 		all = append(all, row.Assertions...)
 	}
 	r.State = "error"
+	if errors.Is(cause, agentpreview.ErrDiagnosticsFailed) {
+		return fail("diagnostics_failed", 1)
+	}
 	if errors.Is(cause, agentpreview.ErrJournalFailed) {
 		return fail("journal_failed", 1)
 	}
@@ -296,6 +331,9 @@ func (a *App) previewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent,
 		return fail("model_unavailable", 1)
 	}
 	if cause != nil {
+		if code := previewCopilotFailure(cause); code != "" {
+			return fail(code, 1)
+		}
 		return fail("execution_failed", 1)
 	}
 	journalOK := outcome.NoJournal && outcome.Journal == "" || !outcome.NoJournal && outcome.Journal != ""

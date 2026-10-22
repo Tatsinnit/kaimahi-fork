@@ -54,6 +54,16 @@ class PackageTests(unittest.TestCase):
             self.assertEqual((self.out / "bin/kmx").stat().st_mode & 0o777, 0o700)
         self.assertEqual(list(self.root.iterdir()), [])
 
+    def test_native_view_is_bundled_without_tests_or_dependencies(self):
+        self.build()
+        native = "com.github.copilot/extensions/agent-view"
+        names = {"extension.mjs", "view.mjs", "index.html", "app.js", "style.css"}
+        self.assertEqual({p.name for p in (self.out / native).iterdir()}, names)
+        for name in names:
+            self.assertEqual((self.out / native / name).read_bytes(),
+                             (HERE / native / name).read_bytes())
+        self.assertFalse((self.out / "node_modules").exists())
+
     def test_windows_command_is_explicit(self):
         self.build(target="windows/amd64")
         config = json.loads((self.out / "mcp.json").read_text())
@@ -206,8 +216,10 @@ class PackageTests(unittest.TestCase):
         self.assertIn("Missing/unknown versions, states or verdicts are not passes.", prose)
         self.assertNotIn("kmx test explain --file", skill)
         self.assertNotIn("PLUGIN_ROOT", skill)
-        self.assertFalse(any(p.suffix in {".py", ".js", ".ps1", ".sh"}
-                             for p in self.out.rglob("*")))
+        scripts = {p.relative_to(self.out).as_posix() for p in self.out.rglob("*")
+                   if p.suffix in {".py", ".js", ".mjs", ".ps1", ".sh"}}
+        self.assertEqual(scripts, {name for name in package.NATIVE_FILES
+                                   if Path(name).suffix in {".js", ".mjs"}})
 
 
 @unittest.skipIf(os.name == "nt", "main still blocks native Windows CLI; packaging checks run above")
@@ -224,6 +236,22 @@ class ProcessTests(unittest.TestCase):
         cls.digest = hashlib.sha256(cls.engine.read_bytes()).hexdigest()
         cls.target = subprocess.check_output(["go", "env", "GOOS", "GOARCH"],
                                              text=True).strip().replace("\n", "/")
+
+    def test_unconfigured_bundle_refuses_before_protocol_or_file_writes(self):
+        with tempfile.TemporaryDirectory(prefix="unbound plugin ") as temp:
+            base = Path(temp)
+            output = base / "plugin"
+            package.build(binary=self.engine, sha256=self.digest, target=self.target,
+                          root=None, output=output, version="0.1.0")
+            config = json.loads((output / "mcp.json").read_text())
+            server = config["mcpServers"]["kmx-agent-builder"]
+            process = subprocess.run([str(output / server["command"]), *server["args"]],
+                                     cwd=base, capture_output=True, text=True, timeout=10,
+                                     env={**os.environ, "KMX_HOME": str(base / "home")})
+            self.assertNotEqual(process.returncode, 0)
+            self.assertEqual(process.stdout, "")
+            self.assertIn("root", process.stderr.lower())
+            self.assertEqual(set(base.iterdir()), {output})
 
     def test_relocated_bundle_runs_real_rooted_fail_fix_loop(self):
         # A wrong bundled command/root/schema or fixture-only result breaks this loop.
@@ -323,7 +351,14 @@ class ProcessTests(unittest.TestCase):
                                  ("complete", "pass", True))
                 self.assertEqual(passed["file"]["revision"], new_revision)
                 self.assertEqual(passed["modelRoute"], {"provider": "fake", "model": "fake"})
-                self.assertEqual(passed["runner"], "preview runner (no journal)")
+                self.assertNotIn("runner", passed)
+                journals = list((home / "local-preview" / "journals").glob("*.db"))
+                # Run, subset Test and full Test each own one journal. The
+                # packaged fake route must retain content without leaking handles.
+                self.assertEqual(len(journals), 3)
+                self.assertTrue(all(path.stat().st_size > 0 for path in journals))
+                for journal in journals:
+                    self.assertNotIn(journal.name, json.dumps(passed))
                 self.assertEqual(passed["retention"], {"status": "not_requested"})
 
                 # Mutation refusal must not change the bound charter or escape into the cache/cwd.

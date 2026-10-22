@@ -81,6 +81,13 @@ The signature covers the four binaries, **not** the separately published
 `kmx.rb` formula. `install.sh` and Homebrew check checksums only; they do not
 automatically verify this bundle.
 
+Copilot plugin archives use a separate `plugin-checksums.txt` and Sigstore
+bundle, signed by the same workflow identity after exact engine/archive checks.
+They do not change the four-binary checksum inventory above. Verify the archive
+before extraction/execution, then explicitly configure the selected root before
+installation; see the [plugin package guide](../plugins/copilot/README.md#release-archives-and-explicit-setup).
+Windows plugin delivery remains unavailable while native CLI builds are guarded.
+
 ## Versions
 
 Tags are `vMAJOR.MINOR.PATCH`, and **the tag is the source of truth** — the
@@ -106,6 +113,15 @@ to publish a binary that does not report its own tag.
 
 Releases use the root `vX.Y.Z` tag for the repository and CLI. The root is the
 only Go module; no paired module release tag is needed.
+
+Every tag and manual dry run first requires the full read-only Orka and kagent
+workers, in parallel. Each qualified commit must equal the release checkout,
+including an annotated tag's resolved commit. Passing nightly evidence at another SHA is not reused.
+A failed qualification blocks build, signing and publication, including native
+Copilot plugin assets. Inspect the failure and rerun the failed workflow jobs
+after addressing it; there is no automatic qualification retry or timeout increase.
+Both full live proofs must finish before release building begins. The hermetic
+kagent PR check is not live qualification and cannot replace either release gate.
 
 ## Install
 

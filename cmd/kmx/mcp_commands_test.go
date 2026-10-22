@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +13,9 @@ import (
 	"time"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/app"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/modelaccess"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/modelaccess/copilot"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/runtime"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -40,6 +44,7 @@ func TestMCPCommandGracefulCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	cr, sw, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +78,71 @@ func TestMCPCommandGracefulCancellation(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("server did not stop")
+	}
+}
+
+func TestMCPCommandCopilotRoute(t *testing.T) {
+	sr, cw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, sw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sr.Close()
+	defer cw.Close()
+	defer cr.Close()
+	defer sw.Close()
+	var ignored, diag bytes.Buffer
+	deps, loads := testDependencies(&ignored, &diag)
+	runner := &cliPreviewFake{verdict: runtime.EvaluationPass}
+	deps.stdin, deps.stdout, deps.fileRunner = sr, sw, runner
+	root := t.TempDir()
+	source, err := os.ReadFile(cliPreviewFile(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source = bytes.ReplaceAll(source, []byte("**Preferred:** fake"), []byte("**Preferred:** gpt-test"))
+	if err := os.WriteFile(filepath.Join(root, "copilot.agent.md"), source, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	cmd := newRootCommand(&commandState{deps: deps})
+	cmd.SetArgs([]string{"mcp", "--root", root, "--provider", "copilot"})
+	done := make(chan error, 1)
+	go func() { done <- cmd.ExecuteContext(ctx) }()
+	client := sdk.NewClient(&sdk.Implementation{Name: "copilot-route-test", Version: "1"}, nil)
+	cs, err := client.Connect(ctx, &sdk.IOTransport{Reader: cr, Writer: cw}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	if runner.calls != 0 {
+		t.Fatal("MCP startup executed a model")
+	}
+	for _, operation := range []string{"run", "test"} {
+		result, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: operation, Arguments: map[string]any{"schemaVersion": 1, "path": "copilot.agent.md"}})
+		want := modelaccess.Route{Provider: "copilot", Model: "gpt-test", Endpoint: modelaccess.CopilotEndpoint, Auth: "copilot"}
+		if err != nil || result.IsError || runner.request.Route != want || *loads != 0 {
+			t.Fatalf("MCP route=%+v err=%v config=%d", runner.request.Route, err, *loads)
+		}
+	}
+	runner.cause = errors.Join(copilot.ErrAuthRequired, errors.New("PRIVATE AUTH CAUSE"))
+	for _, operation := range []string{"run", "test"} {
+		result, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: operation, Arguments: map[string]any{"schemaVersion": 1, "path": "copilot.agent.md"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.Marshal(result)
+		if err != nil || !result.IsError || !strings.Contains(string(data), "copilot_auth_required") || strings.Contains(string(data), "PRIVATE") {
+			t.Fatalf("unsafe MCP auth failure: %s / %v", data, err)
+		}
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -147,7 +217,7 @@ func TestMCPCommandSharedOperationParity(t *testing.T) {
 		}
 	}
 	// Real instruction edit/fail/fix/pass loop over the offline fake model route;
-	// this is not real-model or Sessions execution qualification.
+	// this exercises embedded Sessions, not real-model execution qualification.
 	var previous struct{ File struct{ Revision string } }
 	b, _ := json.Marshal(created.StructuredContent)
 	if err := json.Unmarshal(b, &previous); err != nil {
@@ -172,7 +242,7 @@ func TestMCPCommandSharedOperationParity(t *testing.T) {
 		t.Fatalf("instruction regression hidden: %+v", r)
 	}
 	summary := failed.Content[0].(*sdk.TextContent).Text
-	if !strings.Contains(summary, "greeting") || !strings.Contains(summary, "no journal") || strings.Contains(summary, "PRIVATE OPERAND") || strings.Contains(summary, "different response") || strings.Contains(summary, "schemaVersion") {
+	if !strings.Contains(summary, "greeting") || strings.Contains(summary, "no journal") || strings.Contains(summary, "PRIVATE OPERAND") || strings.Contains(summary, "different response") || strings.Contains(summary, "schemaVersion") {
 		t.Fatalf("failure summary lost or leaked content: %s", summary)
 	}
 	fixed := call("edit", map[string]any{"schemaVersion": 1, "path": "greeter.agent.md", "expectedRevision": changed.File.Revision, "content": string(source)})
@@ -184,7 +254,7 @@ func TestMCPCommandSharedOperationParity(t *testing.T) {
 	if err := json.Unmarshal(b, &r); err != nil {
 		t.Fatal(err)
 	}
-	if passed.IsError || !r.FullPass || r.File.Revision != previous.File.Revision || r.File.Revision == changed.File.Revision || r.Runner != "preview runner (no journal)" {
+	if passed.IsError || !r.FullPass || r.File.Revision != previous.File.Revision || r.File.Revision == changed.File.Revision || r.Runner != "" {
 		t.Fatalf("full pass/revision/runner label lost: %+v", r)
 	}
 	if *loads != 0 || diag.Len() != 0 {

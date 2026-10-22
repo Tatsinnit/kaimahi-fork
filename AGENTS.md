@@ -8,12 +8,21 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md), the
 
 - `model list [-o table|json]` defaults to config-free bounded local discovery.
   Explicit `--provider copilot` lists available Chat-compatible routes without
-  starting sign-in. `model login` uses GitHub device flow; `--gh` alone opts into
-  bounded private `gh auth token --hostname github.com` capture. Reusable tokens
-  live only in kmx's native OS keychain item, with no file fallback; exchange
-  bearers stay in memory. Logout deletes only that item and clears memory.
+  starting sign-in. `model login` uses GitHub device flow; `--gh` explicitly
+  copies a bounded private gh token into kmx's OS keychain. Runtime credentials
+  prefer explicit `COPILOT_GITHUB_TOKEN`, then kmx's keychain item; only an
+  unavailable keychain permits bounded `gh auth token --hostname github.com`
+  capture without persistence. Invalid explicit tokens, missing owned items and
+  service refusals do not switch credentials. No token file fallback; exchange
+  bearers stay in memory. Login explains runtime options if the keychain is
+  unavailable. Logout clears only kmx's item/memory, not gh or environment auth.
   `internal/kmx/modelaccess/copilot` returns a selected-route RoundTripper for
-  direct JSON/SSE Chat Completions, not a runner, proxy or CLI-chat replacement.
+  direct JSON/SSE Chat Completions, not a proxy or CLI-chat replacement.
+  File Run/Test and shared MCP execution consume it only with explicit
+  `--provider copilot`, exact authored model and prior sign-in. Default only
+  the pinned Copilot endpoint; refuse other endpoints before credential access.
+  Never inject tokens in the runner. Keep known Copilot errors static and safe,
+  stop later sends on them (including judging), and preserve cancellation.
   Establish auth through the catalog; exchange only after credential refusal,
   never subscription/policy/quota refusal. Never replay inference or substitute
   a model. Keep modelaccess independent of App and Unix-only helpers. Foundry
@@ -345,9 +354,13 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md), the
   and Secret metadata bracketing. Hermetic tests are not live qualification.
   Runtime-core assertions and llmJudge remain retained with their test groups;
   native judge wiring does not enable recorded candidate execution.
-  The checkout-only native qualifier runs in the existing exclusively owned
-  Orka shard, after legacy model proof, with private captures and metadata-only
-  artifacts. Its second exclusively owned kind cluster has one pinned Orka in
+  The checkout-only native qualifier runs in the full read-only reusable Orka
+  worker after raw model proof, with private captures and metadata-only artifacts.
+  Relevant/unknown PRs, manual qualification, daily main nightly and every release
+  retain that proof. Only explicitly safe PRs and routine main pushes skip it.
+  Keep required `hygiene` and `e2e-hello-world` checks intact and fail closed on
+  unintended skips/failures. No path/docs shortcuts belong inside the full worker.
+  Its second exclusively owned kind cluster has one pinned Orka in
   orka-system and its own inference Provider/Secret; it shares the source AIKit
   endpoint through a fixture-only private-network NodePort, never a host mapping
   or another model workload. Registry --promote qualifies GET-only planning,
@@ -387,6 +400,10 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md), the
   the same operation vocabulary where their scopes match.
 - Reuse the existing operation handlers. Keep Cobra syntax, terminal rendering,
   runtime capabilities, target mechanics and infrastructure ownership separate.
+  Bind operational Apps through `operationApplication(cmd)`: it preserves the
+  invocation's App identity and copies its Runner before attaching `cmd.Context()`.
+  Never rebind a shared Runner in place; preserve explicit child and cleanup
+  contexts and signal ownership.
   A renamed command must not silently change runtime, target, ownership or
   supported operations.
 - Update command registration, help, completion, relevant chat/console labels,
@@ -419,37 +436,100 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md), the
 ## Agent-file preview boundary
 
 Canonical `run FILE` / `test FILE` use the parser and `agentpreview.Runner`
-interface without cluster/workspace configuration. CLI uses a temporary direct
-`preview runner (no journal)` for fake/local routes, with one agent call per input/example and one judge
-call per llmJudge; no Sessions, journal, retries or fallback. Remove it when the
-embedded runner lands. Scripted test fakes remain `_test.go` only, not real-model
-qualification. `app.FilePreviewResult` v1 is the safe shared projection, not a
+interface without cluster/workspace configuration. CLI/MCP fake/local routes
+use embedded Sessions: optional ad-hoc input first, selected ordered examples,
+one invocation-owned private journal, one fresh Session per turn, and the shared
+two-sample judge. Execution/deadline errors abort later sends; journal close
+failure vetoes completion. When the agent OR judge uses Copilot, retain the direct
+`preview runner (no journal)` and report NoJournal for the whole invocation,
+with one judge call per llmJudge. Fully journaled Copilot is follow-up work until
+provider-owned content preflight is available; never expose tokens to the runner.
+No retries or fallback. Scripted test fakes remain `_test.go` only, not real-model
+qualification. Copilot selection sends instructions/inputs and any judging
+answer/rubric to the hosted service; never imply SDK or Sessions execution.
+`app.FilePreviewResult` v1 is the safe shared projection, not a
 native evidence receipt. Subset is always partial, execution/journal failure is
 unknown, and only an explicit caller override changes the judge route. Keep
 live `run --agent`, native workspace Test/Explain and legacy Eval unchanged.
+File Run/Test `--verbose` is content-free stderr diagnostics only, never implicit
+`--show-content`. Keep transport errors classified without raw URLs/bodies;
+only validated local origins and standard endpoint paths may be shown. Failed
+diagnostic writes stop later sends and refuse a full pass.
 See [file preview](docs/kmx.md#agent-file-local-preview-unreleased-integration).
 
 ## Agent-file MCP boundary
 
 `mcp --root DIRECTORY` is stdio-only and config-free at startup. Require an
-absolute existing root, never cwd/client-root fallback. Expose exactly
+absolute existing root, never cwd/client-root fallback. Normalize native absolute
+tool paths through cleaning and symlink resolution to an allowed root-relative
+layout; outside targets, dangling links and changed root identity refuse. Keep
+relative-path restrictions and descriptor-bound file IO unchanged. Expose exactly
 Create/Edit/Run/Test; call canonical parsing and `App.PreviewAgentSnapshot`,
 never the path wrapper or shell CLI strings. Model routes are trusted startup
 configuration, not tool/charter fields. Keep complete safe App results on errors;
 fixture runners are not production execution. Edit preserves mode bits, not
 ownership/ACLs/xattrs; normal directory inheritance is the day-0 own-file contract.
-No new runner, Explain tool or network listener. See [MCP](docs/kmx.md#local-stdio-mcp).
+No new runner, Explain tool or MCP network listener. The read-only
+`kmx://agent/{path}` resource projects supported agent files within that root;
+it is not a fifth tool or generic file reader. Root confirmation suffices for
+charter content; safe model excerpts still require existing showContent opt-in.
+Latest preview state is process-local, revision-bound and never inferred on read.
+The separate native Copilot view uses the host SDK and a private loopback asset
+bridge, without mutations or direct agent-file reads.
+See [MCP](docs/kmx.md#local-stdio-mcp).
 
 ## Single-file charter boundary
 
-`internal/kmx/agentfile` parses only the canonical shape in
+`internal/kmx/agentfile` keeps `Parse`/`Load` canonical as described in
 [agent-file.md](docs/agent-file.md), offline, with Examples excluded from
-instructions and exact-byte revisions. Reuse runtime assertion semantics;
+instructions and exact-byte revisions. Separate explicit `ParseSquad` accepts
+qualified Squad 1.1.0 native starters/enrichment with an approved cast mapping,
+original bytes and source spans. It returns a distinct `SquadCharter`, not a
+runnable `Agent`; current CLI/MCP preview and authoring remain canonical-only.
+Never auto-detect this profile, invent missing native identity fields or treat
+its release selector as cast-origin/registration proof. Reuse runtime assertion semantics;
 refuse tools and unsupported declarations. Parse/Load grant no execution,
 trusted route, source-write, Squad registration or native suite-loader authority.
+`Inspect` shares the scanner for read-only minimal titled-agent display while
+`Parse` remains the execution validator; inspection grants no Run/Test acceptance.
 Keep payload-bearing parsed values out of default logs/results. The loader
 refuses static special files and symlink/reparse path components; it is not a hostile
 concurrent filesystem sandbox.
+
+## Local preview boundary
+
+`internal/kmx/localpreview` runs one tool-free agent file on embedded Sessions
+(in-memory gRPC, upstream Service/Placer/`chat` harness, private SQLite journal
+under `config.LocalPreviewJournalDir()`), labeled **local preview**. See
+[local-preview.md](docs/local-preview.md). Its `agentpreview.Runner` adapter
+backs `run/test FILE` and MCP for fake/local routes; the direct Copilot exception
+above remains explicitly unjournaled. `Model.Preferred` is exact: `fake` is the in-memory deterministic
+route; other models need an explicit OpenAI-compatible endpoint and optional
+key environment variable name. No fallback, retries, tool execution, daemon,
+subprocess, cluster or config probing. Refuse missing routes, tool assertions
+and unwired judges before any file or network effect; refuse journal-bound
+instructions, examples, ad-hoc input and identities containing a resolved agent
+or judge credential before the journal opens, including returned assertion IDs,
+types and authored judge model/version metadata; refuse
+tool-call/malformed/duplicate-key/oversized/non-200 replies, missing or mismatched
+response model identities, and answers
+containing the endpoint credential (exact value, any length) with fixed text,
+because Sessions journals content at turn start and model errors verbatim.
+Credentials never reach files, journals, results or errors. Consume only parsed
+agent-file fields; Examples YAML comments never reach model or judge requests,
+journals or results. `llmJudge` reuses the native judge through
+`app.LocalPreviewJudge`, defaults to the agent route (fake judge for fake), and
+only explicit `JudgeEndpoint` overrides it. Journals keep content in cleartext,
+bounded to 20 runs at each start, owner-only, clearable by run or all;
+executing runs hold an OS lock and are never pruned or cleared (on Windows this
+rests on unverified share-mode behavior), and overlapping starts can leave
+extra finished runs until the next start or clear. Journals stay under
+`config.StateDir` on every OS (`%AppData%` on Windows, disclosed as roaming)
+until native Windows support
+([#578](https://github.com/kaimahi-agents/kaimahi/issues/578)) decides Windows
+state. Inspection replays with zero model calls and has no verdicts. Preview
+and replay never produce suite evidence, receipts, publication or Deploy
+authority.
 
 ## Offline multi-member workspace boundary
 
@@ -531,9 +611,13 @@ Do not infer enforcement from authoring, transfer, readiness, labels or annotati
 - The portable format, validator and schemas are owned by
   [AgentSuite](https://github.com/agent-primitives/suite/blob/main/spec.md).
   Keep KMX details, migration notes, and design history in this repository's
-  implementation documentation, issues, or changelog. Import the public module
-  explicitly as `agentsuite "github.com/agent-primitives/suite"`; use `kmxsuite`
-  for the internal builder package and `suiteoras` for its ORAS adapter.
+  implementation documentation, issues, or changelog. Import focused public
+  packages as `suitecore` (`github.com/agent-primitives/suite/core`), `suiteoci`
+  (`github.com/agent-primitives/suite/oci`), `suiteevidence`
+  (`github.com/agent-primitives/suite/evidence`) and `suiteflow`
+  (`github.com/agent-primitives/suite/experimental/flow`). Do not import the
+  deprecated module root. Keep `kmxsuite` for the internal builder package and
+  `suiteoras` for its ORAS adapter.
   Keep byte-identical consumer fixtures under `testdata/agentsuite`; refresh
   their provenance manifest only with reviewed upstream changes and run
   `python3 scripts/check-agentsuite-fixtures.py`.
@@ -560,6 +644,13 @@ Do not infer enforcement from authoring, transfer, readiness, labels or annotati
   MCP proof, separately tool-free packaged two-case eval/evaluated push and
   source-withheld digest Deploy with occupied-repeat refusal. No legacy receipt,
   status or judge claim. Final build/live execution are needed for qualification.
+- Every PR/main push gets hermetic kagent contract/fixture and focused offline Go
+  checks, labelled not live qualification. Full live A2A, packaged evaluation,
+  evaluated push, digest lift and helpers run nightly/manual and on the exact
+  release commit. Preserve the full worker's pins, commands, retries and budget.
+  `e2e-hello-world` must always evaluate fast success and intentional full skips;
+  failed/cancelled/missing proof is never an intentional skip. Tom monitors nightly
+  CI; no new issue-reporting authority is implied.
 
 ## Candidate evaluation and explicit cleanup
 

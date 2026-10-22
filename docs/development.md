@@ -167,9 +167,23 @@ python3 scripts/test_model_fixtures.py -v
 
 ### AgentSuite dependency and consumer fixtures
 
-Import the separate module as `agentsuite "github.com/agent-primitives/suite"`.
-The internal builder uses `kmxsuite` and the ORAS adapter uses `suiteoras`.
-`go.mod` pins the published release `v0.6.0`, with its sums in `go.sum`.
+Import only the focused packages a file needs from the separate module:
+
+```go
+import (
+    suitecore "github.com/agent-primitives/suite/core"
+    suiteevidence "github.com/agent-primitives/suite/evidence"
+    suiteflow "github.com/agent-primitives/suite/experimental/flow"
+    suiteoci "github.com/agent-primitives/suite/oci"
+)
+```
+
+Use `suitecore` for portable models and JSON/identity helpers, `suiteoci` for
+artifact validation and diff, `suiteevidence` for claims and both verifiers,
+and `suiteflow` for explicit stored-flow types and validation. The standalone
+`policy` import is unchanged. Do not import the deprecated module root.
+The internal builder keeps `kmxsuite` and its ORAS adapter keeps `suiteoras`.
+`go.mod` pins the published release `v0.7.0`, with its sums in `go.sum`.
 Use the [complete release-pinned schema bundle](docs-site.md#current-agentsuite-schema-selection)
 for editors and external validators; the historical hosted schemas are not the
 current consumer contract.
@@ -300,9 +314,67 @@ Cloud cleanup has different [ownership rules](aks.md#teardown).
 The workflow emits `hygiene` and `e2e-hello-world` merge gates. The latter
 fail-closed aggregates four retained shards: `e2e-kagent-lift`,
 `e2e-orka-runtime`, `e2e-orka-helm` and `e2e-quickstart`, plus successful
-classification. Its existing #315 skip/failure policy remains: only intentional
-skips are accepted, never failed/cancelled shards. Required-check rules are
-managed separately on GitHub; deleting a workflow job does not update a ruleset.
+classification and the independent `kagent-contract` hermetic check. Only intentional skips are accepted, never failed/cancelled
+shards. Orka runtime proof may skip only an explicitly safe PR or a main push;
+unknown changes and events default to full proof. Required contexts remain
+`hygiene` and `e2e-hello-world`, without a ruleset change.
+
+The read-only [Orka worker](../.github/workflows/orka-runtime.yml) runs the same
+complete proof when invoked, including native evaluation, transfer, promotion,
+and pinned-update checks. It has no internal Markdown shortcut. Unrecognized
+Markdown and live instruction fixtures require qualification; root policy docs
+not explicitly listed also run. Its raw check is `e2e-orka-runtime / qualify`.
+Quickstart, stock Helm and clone-free qualification keep their existing routing;
+not every Orka-bearing job is moved out of PR CI.
+
+[Orka nightly](../.github/workflows/orka-nightly.yml) runs the full main proof
+at 03:23 UTC and supports manual qualification after the workflow lands. That
+schedule shares the existing CI cron but owns a separate full worker. Its summary
+is red for failure, cancellation or missing qualification. Scheduled main failures
+maintain one workflow-owned issue assigned to `gambtho`, containing only run link,
+commit and safe status. Current success closes it; older success cannot close a
+newer failure. Manual branch qualification does not alter main health.
+
+Moving main-push runtime proof to nightly trades immediate post-merge detection
+for detection on the next nightly (normally within 24 hours) or before release.
+Individually passing PRs can still interact after merging. Check Actions when the
+last completed main nightly is older than 30 hours: an issue reporter cannot
+report a schedule that never started. The first scheduled run remains an
+operational check after merge, not evidence supplied by local fixtures.
+
+### Fast kagent PR coverage and full live qualification
+
+All PRs, including runtime-relevant and unknown diffs, run **kagent contract —
+not live qualification**. The fast check executes the existing hermetic Python
+bootstrap, pinned-profile, fixture request-count, qualifier refusal and mutation
+audit contracts plus suite-lift contract tests. Focused offline Go tests cover
+kagent profile/version fences, evaluation parsing, ownership and drift,
+placement/provenance and refusal paths. These use local fakes/fixtures, not a
+live kagent cluster. All App shards and hygiene checks remain enabled.
+
+Live upstream MCP/A2A (one tool call, two model calls and one terminal answer),
+full packaged evaluation, evaluated push, source-free digest lift and private
+placement helpers run through the unchanged read-only
+[kagent worker](../.github/workflows/kagent-runtime.yml). It runs once in the
+existing 03:23 UTC scheduled CI, on manual CI and before every release/dry run.
+PRs and routine main pushes intentionally skip only that full worker, regardless
+of `kagent_changed`; the fast check must still pass. `e2e-hello-world` always
+evaluates both outcomes and refuses fast-check skips, failures, cancellations,
+missing results or unintended full-worker skips. Required contexts stay the same.
+
+The fast check does **not** qualify live A2A execution, upstream image/bootstrap
+compatibility, readiness, actual suite execution or cluster cleanup. Moving these
+checks delays detection until nightly (normally within 24 hours) or before release.
+Tom watches scheduled CI in Actions; there is no new kagent issue reporter or
+promise that an undispatched schedule can report itself. Manual CI remains the
+way to request immediate full qualification. Nothing changes runtime pins,
+assertions, retries or budgets, and no Helm/Quickstart cluster or image cache is shared.
+
+Every release/dry run requires fresh full **Orka and kagent** worker success at
+the exact built commit; no earlier nightly success is reused. The worker is read-only; only the
+scheduled-main issue reporter has issue-write permission. Reporter errors remain
+visible as workflow failures. Use `gh pr checks --required` for required contexts;
+a green gate does not establish human approval or resolved review threads.
 
 The v0.10.2 live-create shard `e2e-kagent-create` and clusterless bundle recorded
 Sessions/judge/reference-verify shard `e2e-eval-loop` are removed, along with the
@@ -398,6 +470,20 @@ Check coverage against existing image references and digests, including
 Hub; reports do not call that a mirror success. Existing Postgres ECR pins stay
 unchanged. Model-weight downloads from `registry.ollama.ai` are separate from
 OCI pulls and do not use these mirrors.
+
+## Operation contexts
+
+Operational Cobra adapters use `operationApplication(cmd)` to bind
+`cmd.Context()` to a Runner copy on the invocation's App. Subprocesses,
+network requests and waits using `App.operationContext()` inherit the caller's
+cancellation, deadline and values without mutating the original shared Runner.
+The invocation's App identity and recovery metadata remain unchanged.
+`targets --detect` uses the same adapter; offline capability listing remains
+configuration-free. Help and completion do not construct an operational App.
+
+Keep narrower operation/case deadlines and explicitly scoped cleanup contexts.
+This binding does not add a global signal handler, change command-specific
+signal ownership, or detach work from cancellation.
 
 ## Invariants to preserve
 
