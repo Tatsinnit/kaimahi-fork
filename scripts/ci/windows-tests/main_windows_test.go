@@ -180,7 +180,8 @@ func nonUserDefaultOwner(token windows.Token, user *windows.SID) (*windows.SID, 
 		return nil, err
 	}
 	for _, group := range groups.AllGroups() {
-		if group.Sid != nil && group.Sid.IsValid() && !group.Sid.Equals(user) && group.Attributes&windows.SE_GROUP_OWNER != 0 {
+		if group.Sid != nil && group.Sid.IsValid() && !group.Sid.Equals(user) &&
+			group.Attributes&windows.SE_GROUP_OWNER != 0 && group.Attributes&windows.SE_GROUP_USE_FOR_DENY_ONLY == 0 {
 			return group.Sid.Copy()
 		}
 	}
