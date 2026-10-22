@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -100,6 +101,66 @@ func TestUnixSecurityModes(t *testing.T) {
 			t.Errorf("immediate mode %v = %v", tc.mode, err)
 		}
 	}
+}
+
+type unixOwnershipInfo struct {
+	os.FileInfo
+	stat *syscall.Stat_t
+}
+
+func (i unixOwnershipInfo) Sys() any { return i.stat }
+
+func TestUnixSecurityOwnership(t *testing.T) {
+	dir := foundationTempDir(t)
+	privatePath := filepath.Join(dir, "private")
+	if err := os.WriteFile(privatePath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	privateInfo, err := os.Stat(privatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateStat := *privateInfo.Sys().(*syscall.Stat_t)
+	privateStat.Uid = foreignUID(privateStat.Uid)
+	if err := checkUnixPrivateInfo(unixOwnershipInfo{FileInfo: privateInfo, stat: &privateStat}); !errors.Is(err, ErrUnsafe) {
+		t.Fatalf("foreign private owner = %v, want unsafe", err)
+	}
+
+	ancestorPath := filepath.Join(dir, "ancestor")
+	if err := os.Mkdir(ancestorPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(ancestorPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ancestorInfo, err := os.Stat(ancestorPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ancestorStat := *ancestorInfo.Sys().(*syscall.Stat_t)
+	ancestorStat.Uid = foreignUID(ancestorStat.Uid)
+	if err := checkUnixSafeDirectoryInfo(unixOwnershipInfo{FileInfo: ancestorInfo, stat: &ancestorStat}, false); !errors.Is(err, ErrUnsafe) {
+		t.Fatalf("foreign 0755 ancestor owner = %v, want unsafe", err)
+	}
+	ancestorStat.Uid = 0
+	if err := checkUnixSafeDirectoryInfo(unixOwnershipInfo{FileInfo: ancestorInfo, stat: &ancestorStat}, true); err != nil {
+		t.Fatalf("root-owned 0755 ancestor = %v, want pass", err)
+	}
+
+	missingOwner := unixOwnershipInfo{FileInfo: privateInfo}
+	if err := checkUnixPrivateInfo(missingOwner); !errors.Is(err, ErrUnreadable) {
+		t.Fatalf("missing private ownership = %v, want unreadable", err)
+	}
+	if err := checkUnixSafeDirectoryInfo(unixOwnershipInfo{FileInfo: ancestorInfo}, false); !errors.Is(err, ErrUnreadable) {
+		t.Fatalf("missing ancestor ownership = %v, want unreadable", err)
+	}
+}
+
+func foreignUID(uid uint32) uint32 {
+	if uid == ^uint32(0) {
+		return uid - 1
+	}
+	return uid + 1
 }
 
 func TestUnixDescriptorsAreNonblockingAndCloseOnExec(t *testing.T) {
