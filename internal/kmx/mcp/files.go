@@ -1,4 +1,6 @@
-// Package mcp adapts local agent-file operations to the stdio MCP boundary.
+// Package mcp adapts local agent-file operations to stdio MCP.
+// File access requires an explicit root; execution uses shared App snapshots.
+// Tool requests must not choose model endpoints or substitute a runner.
 package mcp
 
 import (
