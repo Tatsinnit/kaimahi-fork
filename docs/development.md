@@ -136,6 +136,20 @@ use `XDG_CONFIG_HOME` as the test boundary: Go uses it for the native Linux
 config location, while macOS uses `~/Library/Application Support`. `KMX_HOME`
 is the repository's explicit cross-platform isolation contract.
 
+`internal/kmx/fileaccess` has native Linux and Windows amd64 package tests for
+checked read-only opens, security inspection and physical identity. Windows
+arm64 is compiled and vetted, not executed. The package is deliberately unwired
+from operation adapters and has no writer, lock, flush, state or publication
+API. These tests do not build or qualify the guarded Windows CLI; use WSL for
+the installed command until the later enablement phase lands.
+
+The hosted Windows test context is established by the test-only
+[`windows-tests` launcher](../scripts/ci/windows-tests/main_windows.go), whose
+native contract tests are in
+[`main_windows_test.go`](../scripts/ci/windows-tests/main_windows_test.go). It
+may change only a duplicated child token's default owner and never changes kmx,
+the parent token, accounts, privileges or machine policy.
+
 ```bash
 formatted=$(gofmt -l cmd internal pkg embed.go embed_test.go) && test -z "$formatted" && go vet ./... && go build ./... && go test ./...
 npm --prefix docs ci --ignore-scripts && npm --prefix docs run docs:check

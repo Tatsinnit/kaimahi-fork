@@ -21,6 +21,13 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md), the
   service start or silent model selection. Native model-access package tests
   remain separate from Windows CLI qualification.
 
+- `internal/kmx/fileaccess` is a package-independent checked-read foundation:
+  existing-file/directory opens, security inspection and physical identity only.
+  It grants no create/write/lock/rename/link/delete/sync/state/publication or
+  repair authority and remains unwired from phase-1 operation adapters. Native
+  Windows package tests qualify local-NTFS reads only, not the guarded Windows
+  CLI, native arm64 execution, an operation, release artifact or user support.
+
 - Follow the [command conventions](docs/command-conventions.md), the implemented
   interface in [docs/kmx.md](docs/kmx.md) and the
   [command alignment record](docs/command-semantics.md). Track outstanding

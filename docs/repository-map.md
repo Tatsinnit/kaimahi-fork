@@ -106,6 +106,12 @@ The adapters are installed-library source; host-side tests check their inert
 contract. The Windows CLI guard remains in place: library cross-builds do not
 enable it.
 
+`internal/kmx/fileaccess` is separately native-tested read-only foundation code:
+opaque checked existing-object opens, DACL/mode inspection and physical identity.
+It remains unwired from operation adapters and exposes no raw descriptor, writer,
+lock, sync, state or publication authority. Native Windows amd64 package tests
+are not CLI/runtime qualification; arm64 remains compile/vet only.
+
 | Directory | Class | Responsibility |
 |---|---|---|
 | `internal/kmx/mcp` | Installed | Stdio-only Create/Edit/Run/Test over canonical parsing and App snapshots, with exclusive atomic publication, revision checks and OS-held writer locks. Edit preserves mode bits, not ownership, ACLs or extended attributes; normal ownership and directory inheritance apply to replacement files. Intended for the user's own files. Runner availability comes from App, with no substitute runner or native Windows CLI qualification. |
@@ -120,6 +126,7 @@ enable it.
 | `internal/kmx/scaffold` | Installed | Native Orka authoring, explicit review-only kagent scaffolding, shared name validation, YAML helpers and file writing. Model-overlay and migration generators are removed. |
 | `internal/kmx/orkaschema` | Installed | Structural schema validation and attribution. Nested historical release/default/frozen-main CRDs support explicit offline validation, not installation or an additional runtime-support claim; the verified chart installs Orka. |
 | `internal/kmx/guard` | Installed | Context-safety checks, context-bound pipeline confirmation and read-only target resolution. |
+| `internal/kmx/fileaccess` | Scaffolding | Package-independent opaque checked reads, private/public security inspection, local-NTFS qualification and physical identity. No operation wiring or create/write/lock/sync/state/publication authority; native package tests do not qualify the Windows CLI. |
 | `internal/kmx/modelaccess` | Installed | Non-secret exact model routing and bounded read-only Foundry Local/Ollama discovery. Config-free model list does not start/install runtimes, download catalogs or execute agents; legacy kind reuse adapts only Ollama inventory. |
 | `internal/kmx/toolchain` | Installed | Pinned, checksum-verified kind, kubectl and Helm downloads. |
 | `internal/kmx/portforward` | Installed | Owned loopback kubectl forwards with bind proof and process lifetime, shared by native Orka results and host tools. |
@@ -215,6 +222,9 @@ inputs, not a replacement user-bundle runner.
 `scripts/ci/` owns checkout-only qualification, not an installed CLI capability.
 Registry-mirror support configures CI host/kind Docker and emits payload-free
 endpoint evidence; see [CI registry mirrors](development.md#ci-registry-mirrors).
+Its `windows-tests` launcher may set the default owner on one duplicated child
+token so hosted-runner fixtures have the token user as owner; it never changes
+the parent token, accounts, privileges, host policy or product behavior.
 Kagent qualification separates pinned external bootstrap/readiness and raw
 upstream Tool/A2A proof from packaged-suite eval, self-diff, evaluated push and
 source-withheld digest Deploy with occupied-repeat refusal. Deploy sends no

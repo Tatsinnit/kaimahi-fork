@@ -61,10 +61,45 @@ jobs:
           path: kmx-app-test.json
           retention-days: 3
 
+  windows-read-foundation:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Build isolated user-owner test launcher
+        shell: pwsh
+        run: go build -trimpath -o "$env:RUNNER_TEMP\kmx-windows-tests.exe" ./scripts/ci/windows-tests
+      - name: Native checked-read, DACL, and identity tests
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP\kmx-windows-tests.exe" go test -race -count=1 -timeout=600s -v ./scripts/ci/windows-tests ./internal/kmx/fileaccess
+          exit $LASTEXITCODE
+      - name: Windows amd64 package vet
+        shell: pwsh
+        run: go vet ./internal/kmx/fileaccess ./scripts/ci/windows-tests
+      - name: Windows arm64 compile and vet (not native execution)
+        shell: pwsh
+        env:
+          GOOS: windows
+          GOARCH: arm64
+          CGO_ENABLED: '0'
+        run: |
+          go test -c -o "$env:RUNNER_TEMP\fileaccess-arm64.test.exe" ./internal/kmx/fileaccess
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -c -o "$env:RUNNER_TEMP\windows-tests-arm64.test.exe" ./scripts/ci/windows-tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go vet ./internal/kmx/fileaccess ./scripts/ci/windows-tests
+          exit $LASTEXITCODE
+
   hygiene:
     runs-on: ubuntu-latest
-    needs: [app-tests]
-    if: ${{ !cancelled() }}
+    needs: [app-tests, windows-read-foundation]
+    if: always()
     steps:
       - uses: actions/checkout@v4
         with:
@@ -676,6 +711,8 @@ jobs:
           "$(go env GOPATH)/bin/staticcheck" ./...
       - name: kmx — build
         run: go build ./...
+      - name: kmx — file-access race tests
+        run: go test -race -count=1 ./internal/kmx/fileaccess
       - name: kmx — Windows libraries (CLI remains guarded)
         run: |
           GOOS=windows GOARCH=amd64 go build ./internal/... ./pkg/...
@@ -710,6 +747,7 @@ jobs:
               "pkg/suiteview": "public read-only suite member recipe views",
               # The reason this job is required at all.
               "internal/kmx/guard": "the context guard's port decisions",
+              "internal/kmx/fileaccess": "checked read-only filesystem and identity foundations",
               "internal/kmx/scaffold": "the scaffolder's key-shape refusals",
               "internal/kmx/orkaschema": "pinned Orka schemas and unknown-field refusals",
               # kmx downloads kind and kubectl. A binary it fetches
@@ -827,8 +865,8 @@ jobs:
           grep -q -- '--- PASS: TestSuiteDiffArtifactsEndToEnd' suite-diff-e2e.out
           ! grep -q -- '--- SKIP:' suite-diff-e2e.out
       # Preserve the required check's name and collect other hygiene diagnostics
-      # even if an app shard fails. Missing, skipped and cancelled shards refuse.
-      - name: Every app test shard succeeded
+      # even if a dependency fails. Missing, skipped and cancelled work refuses.
+      - name: Every required hygiene dependency succeeded
         if: always()
         env:
           SHARDS: ${{ toJSON(needs) }}
@@ -836,12 +874,17 @@ jobs:
           python3 - <<'EOF'
           import json, os, sys
           needs = json.loads(os.environ["SHARDS"])
-          if set(needs) != {"app-tests"}:
-              print("missing or unexpected app shard dependency — refusing success"); sys.exit(1)
-          result = needs["app-tests"].get("result", "unknown")
-          print(f"app-tests: {result}")
-          if result != "success":
-              print("app shards did not all succeed — refusing success"); sys.exit(1)
+          expected = {"app-tests", "windows-read-foundation"}
+          if set(needs) != expected:
+              print("missing or unexpected hygiene dependency — refusing success"); sys.exit(1)
+          bad = {}
+          for name in sorted(expected):
+              result = needs[name].get("result", "unknown")
+              print(f"{name}: {result}")
+              if result != "success":
+                  bad[name] = result
+          if bad:
+              print("required hygiene dependencies did not all succeed:", bad); sys.exit(1)
           EOF
 
   # Linux uses its XDG user-config location while macOS uses
