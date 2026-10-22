@@ -8,10 +8,12 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+var volumeInformationByHandle = windows.GetVolumeInformationByHandle
+
 func requireQualifiedFilesystem(handle windows.Handle) error {
 	name := make([]uint16, windows.MAX_PATH+1)
 	var flags uint32
-	if err := windows.GetVolumeInformationByHandle(handle, nil, 0, nil, nil, &flags, &name[0], uint32(len(name))); err != nil {
+	if err := volumeInformationByHandle(handle, nil, 0, nil, nil, &flags, &name[0], uint32(len(name))); err != nil {
 		return unreadableError(err)
 	}
 	return checkFilesystemInformation(windows.UTF16ToString(name), flags)

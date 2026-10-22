@@ -10,6 +10,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+var fileInformationByHandleEx = windows.GetFileInformationByHandleEx
+
 type fileIDInfo struct {
 	VolumeSerialNumber uint64
 	FileID             [16]byte
@@ -29,7 +31,7 @@ func PhysicalIdentity(ctx context.Context, object Object) (string, error) {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
-		if err := windows.GetFileInformationByHandleEx(handle, windows.FileIdInfo, (*byte)(unsafe.Pointer(&id)), uint32(unsafe.Sizeof(id))); err != nil {
+		if err := fileInformationByHandleEx(handle, windows.FileIdInfo, (*byte)(unsafe.Pointer(&id)), uint32(unsafe.Sizeof(id))); err != nil {
 			return unreadableError(err)
 		}
 		return checkContext(ctx)
