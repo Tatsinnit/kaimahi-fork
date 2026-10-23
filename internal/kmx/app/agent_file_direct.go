@@ -71,6 +71,9 @@ func (d *directFileRunner) Run(ctx context.Context, r agentpreview.Request) (age
 	if r.Agent == nil || len(r.Examples) == 0 || r.Route.Model != r.Agent.Model {
 		return out, errDirectPreview
 	}
+	if len(r.Agent.Tools) > 0 || r.ToolBindings != "" {
+		return out, agentpreview.ErrToolsUnavailable
+	}
 	judge := r.Route
 	if r.JudgeRoute != nil {
 		judge = *r.JudgeRoute
@@ -363,6 +366,9 @@ func parseDirectCompletion(body []byte, model string) (string, bool) {
 
 // Use the parser's real heading locations, not heading-looking text in fences.
 func directFakeInstructions(a *agentfile.Agent) string {
+	if a.NativeTaskInstructions != "" {
+		return strings.TrimSpace(a.NativeTaskInstructions)
+	}
 	lines := strings.Split(a.Instructions, "\n")
 	start := a.Locations["Accountable Responsibilities"].Line
 	end := len(lines)

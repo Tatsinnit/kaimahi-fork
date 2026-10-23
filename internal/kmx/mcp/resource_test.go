@@ -1,7 +1,9 @@
 package mcp
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -150,6 +152,81 @@ func TestAgentResourceRefusalsAreNotOldRevisions(t *testing.T) {
 	got := readView(t, cs, "greeter.agent.md")
 	if got.Latest.Status != "current" || got.Latest.Result == nil || got.Latest.Result.FullPass || got.Latest.Result.ReasonCode != "invalid_selection" {
 		t.Fatalf("same-revision refusal lost: %+v", got.Latest)
+	}
+}
+
+// Catch snapshots that normalize source bytes or mistake display acceptance for
+// strict authoring acceptance. Run/Test must keep their existing strict semantics.
+func TestAgentResourceAuthoringSnapshot(t *testing.T) {
+	f, root, source := canonicalFiles(t)
+	minimal := "# Minimal\n\nGreet a name.\n\n## Model\n- **Preferred:** fake\n\n## Examples" + strings.Split(source, "## Examples")[1]
+	cs := resourceClient(t, f, &app.App{})
+	for _, row := range []struct {
+		name, source string
+		editable     bool
+	}{
+		{"canonical.agent.md", source, true},
+		{"crlf.agent.md", strings.ReplaceAll(strings.ReplaceAll(source, "\r\n", "\n"), "\n", "\r\n"), true},
+		{"lf.agent.md", strings.ReplaceAll(source, "\r\n", "\n"), true},
+		{"minimal.agent.md", minimal, false},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			if err := os.WriteFile(filepath.Join(root, row.name), []byte(row.source), 0600); err != nil {
+				t.Fatal(err)
+			}
+			r, err := cs.ReadResource(t.Context(), &sdk.ReadResourceParams{URI: agentResourceURI(row.name)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got struct {
+				File      File `json:"file"`
+				Authoring *struct {
+					Source   string `json:"source"`
+					Editable bool   `json:"editable"`
+				} `json:"authoring"`
+			}
+			if err := json.Unmarshal([]byte(r.Contents[0].Text), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Authoring == nil || got.Authoring.Source != row.source || got.Authoring.Editable != row.editable {
+				t.Fatal("exact source or strict editability lost")
+			}
+			wantRevision := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(got.Authoring.Source)))
+			if got.File.Revision != wantRevision {
+				t.Fatal("authoring source differs from revision bytes")
+			}
+			strict, err := f.snapshot(t.Context(), row.name)
+			if row.editable && (err != nil || strict.Revision != got.File.Revision) {
+				t.Fatal("strict snapshot semantics changed", err)
+			}
+			if !row.editable && (err == nil || strict != nil) {
+				t.Fatal("inspection widened Run/Test acceptance")
+			}
+		})
+	}
+}
+
+func TestAgentResourceOversizedAuthoringRemainsReadable(t *testing.T) {
+	f, _, source := canonicalFiles(t)
+	source = strings.ReplaceAll(source, "\r\n", "\n")
+	heading := "## Accountable Responsibilities\n"
+	start, end := strings.Index(source, heading), strings.Index(source, "## Non-Responsibilities\n")
+	if start < 0 || end <= start {
+		t.Fatal("canonical section fixture missing")
+	}
+	large := source[:start] + heading + strings.Repeat("&", 190000) + "\n\n" + source[end:]
+	saved, err := f.Create(t.Context(), "large.agent.md", []byte(large))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := readView(t, resourceClient(t, f, &app.App{}), saved.Path)
+	if got.Authoring != nil || got.File.Revision != saved.Revision || len(got.Examples) != 1 || !strings.Contains(got.Instructions, strings.Repeat("&", 190000)) {
+		t.Fatal("oversized optional snapshot lost read-only projection")
+	}
+	got.Authoring = &AgentViewAuthoring{Source: large, Editable: true}
+	encoded, err := json.Marshal(got)
+	if err != nil || len(encoded) <= 2<<20 {
+		t.Fatal("fixture no longer exceeds the encoded resource budget")
 	}
 }
 

@@ -344,9 +344,16 @@ jobs:
           if "gh release create" not in release_text:
               print("release.yml must publish the already-checked artifact set in one draft-to-public release operation")
               sys.exit(1)
-          dry_run_artifact_path = "path: $" + "{{ runner.temp }}/release-assets/"
-          if "Stage the checked release artifacts" not in release_text or dry_run_artifact_path not in release_text:
-              print("release.yml must give dry runs the same flat checked assets used for publication")
+          uploads = [step["with"] for step in wf["jobs"]["release"]["steps"]
+                     if step.get("uses", "").startswith("actions/upload-artifact@")]
+          asset_path = "$" + "{{ runner.temp }}/release-assets/"
+          if len(uploads) != 1 or asset_path not in uploads[0].get("path", "").splitlines():
+              print("release.yml must upload the same checked assets for dry runs and native qualification")
+              sys.exit(1)
+          publish = wf["jobs"].get("publish", {})
+          if (set(publish.get("needs", [])) != {"release", "plugin-install"}
+                  or publish.get("if") != "needs.release.outputs.dry_run == 'false'"):
+              print("release.yml must wait for native install checks and publish only outside dry runs")
               sys.exit(1)
           if 'scripts/homebrew-formula.py "$VERSION" dist/checksums.txt' not in release_text:
               print("release.yml must reject an incomplete or unexpected checksum manifest before publication")
@@ -369,7 +376,12 @@ jobs:
           if 'if [ "$EVENT_NAME" = push ] && [ "$REF_TYPE" = tag ]; then' not in release_text:
               print("release.yml must publish only for tag pushes; manual dispatch is always a dry run")
               sys.exit(1)
-          decide = next(step["run"] for step in wf["jobs"]["release"]["steps"] if step.get("id") == "what")
+          decision = next(step for step in wf["jobs"]["release"]["steps"] if step.get("id") == "what")
+          if (decision["env"].get("RUN_ID") != "$" + "{{ github.run_id }}"
+                  or decision["env"].get("RUN_ATTEMPT") != "$" + "{{ github.run_attempt }}"):
+              print("synthetic release versions must bind the workflow run ID and attempt")
+              sys.exit(1)
+          decide = decision["run"]
           cases = [
               ({"EVENT_NAME": "push", "REF_TYPE": "tag", "REF_NAME": "v0.3.0", "INPUT_VERSION": "", "SHA": "a" * 40},
                {"version": "v0.3.0", "dry_run": "false", "prerelease": "false", "synthetic": "false"}),
@@ -378,11 +390,16 @@ jobs:
               ({"EVENT_NAME": "workflow_dispatch", "REF_TYPE": "branch", "REF_NAME": "main", "INPUT_VERSION": "v0.3.0", "SHA": "b" * 40},
                {"version": "v0.3.0", "dry_run": "true", "prerelease": "false", "synthetic": "false"}),
               ({"EVENT_NAME": "workflow_dispatch", "REF_TYPE": "tag", "REF_NAME": "v0.3.0", "INPUT_VERSION": "", "SHA": "c" * 40},
-               {"version": "v0.0.0-dryrun.cccccccccccc", "dry_run": "true", "prerelease": "true", "synthetic": "true"}),
+               {"version": "v0.0.0-dryrun.cccccccccccc.101.1", "dry_run": "true", "prerelease": "true", "synthetic": "true"}),
+              ({"EVENT_NAME": "workflow_dispatch", "REF_TYPE": "branch", "REF_NAME": "main", "INPUT_VERSION": "", "SHA": "c" * 40, "RUN_ID": "102"},
+               {"version": "v0.0.0-dryrun.cccccccccccc.102.1", "dry_run": "true", "prerelease": "true", "synthetic": "true"}),
+              ({"EVENT_NAME": "workflow_dispatch", "REF_TYPE": "branch", "REF_NAME": "main", "INPUT_VERSION": "", "SHA": "c" * 40, "RUN_ID": "102", "RUN_ATTEMPT": "2"},
+               {"version": "v0.0.0-dryrun.cccccccccccc.102.2", "dry_run": "true", "prerelease": "true", "synthetic": "true"}),
           ]
           for env_add, expected in cases:
               with tempfile.NamedTemporaryFile() as output:
-                  env = dict(os.environ, GITHUB_OUTPUT=output.name, **env_add)
+                  env = dict(os.environ, GITHUB_OUTPUT=output.name, RUN_ID="101", RUN_ATTEMPT="1")
+                  env.update(env_add)
                   run = subprocess.run(["bash", "-c", decide], env=env, text=True, capture_output=True)
                   if run.returncode:
                       print(run.stdout, run.stderr, sep="\n", file=sys.stderr)
@@ -393,7 +410,11 @@ jobs:
                   print(f"release decision mismatch for {env_add}: got {got}, want {expected}")
                   sys.exit(1)
           for name, job in wf["jobs"].items():
-              allowed = {"contents": "write", "id-token": "write"} if name == "release" else {"contents": "read"}
+              allowed = {"contents": "read"}
+              if name == "release":
+                  allowed["id-token"] = "write"
+              elif name == "publish":
+                  allowed["contents"] = "write"
               if job.get("permissions", {}) != allowed:
                   print(f"release job {name} permissions must be {allowed}, got {job.get('permissions', {})}")
                   sys.exit(1)

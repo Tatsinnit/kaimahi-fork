@@ -175,6 +175,10 @@ on stderr, with no result document. Rooted API callers can pass an already-parse
 snapshot without reopening its filename; the CLI path is a thin load-and-delegate
 wrapper.
 Neither operation changes source or produces native evaluation/deploy evidence.
+An optional canonical Tools declaration and explicit `--tool-bindings FILE` select
+only the [host-tool foundation](local-preview.md#host-tool-foundation). The real
+MCP provider is not yet available, so CLI tool execution refuses safely. Hermetic
+embedding tests qualify the bounded host executor/journal path, not live MCP.
 
 File mode uses embedded Sessions for fake/local routes, with one fresh Session
 per ad-hoc input/example and one private SQLite journal for the invocation.
@@ -184,11 +188,13 @@ overall budget. Execution errors stop later sends. Journal close failure prevent
 a full pass. [Journal content, retention and clearing](local-preview.md#journal-retention-and-clearing)
 are disclosed separately: instructions, inputs and answers are retained in cleartext.
 
-**Copilot exception:** when either the agent or judge uses Copilot, the whole
+**Tool-free Copilot exception:** when either the agent or judge uses Copilot, the whole
 invocation keeps the direct **preview runner (no journal)** and reports `NoJournal`
 at the runner boundary. It creates no Sessions journal. Fully journaled Copilot
 is follow-up work: its credential-owning transport does not yet provide the
-pre-journal content check. No tokens are exposed to the runner.
+pre-journal content check. No tokens are exposed to the runner. Declared tools
+with a Copilot agent or judge refuse; Copilot tool support depends on
+[#662](https://github.com/kaimahi-agents/kaimahi/issues/662).
 There are no retries, redirects or provider/model fallback. A nil dependency
 still refuses `runner_unavailable`. Hermetic tests do not qualify real local
 models or native Windows.
@@ -304,6 +310,33 @@ Do not mix FILE with `--agent`, workspace, destination, evidence, native judge o
 cluster flags, including explicitly supplied defaults. Existing live
 `run --agent` and full-workspace Test contracts remain separate and unchanged.
 
+### Frozen run-profile export (unreleased)
+
+This is a **temporary demo bridge**, not the deploy contract. That contract is
+the tested AgentSuite artifact by digest (kmx pushes; the host pulls); this
+command neither implements that deployment path nor defines a host-side API.
+
+```bash
+kmx run-profile export ./release-writer.agent.md
+```
+
+Export one canonical agent file offline as deterministic JSON on stdout. It
+contains authored instructions, the exact model, ordered examples/assertions,
+source/instruction/model/example SHA-256 hashes and `targetStatus: not_run` for
+every example. No configuration, credential, provider, model, runtime or registry
+is accessed. Unsupported declarations still refuse through the canonical parser;
+there is no model override. This source-file projection is not a tested package,
+evaluation receipt, AgentSuite runtime profile or deployment authorization.
+
+Stdout is explicitly content-bearing, including inputs and judge rubrics: keep
+it private. Shell redirection can truncate an existing file before validation;
+it is caller-owned and has no kmx privacy/exclusive-create guarantee. There is
+no `--out` writer. Exit0 means complete output, exit1 means refusal/output failure;
+a failed writer may have received partial bytes. Hashes establish unsigned byte
+consistency, not source provenance, model weights, serving availability or target
+execution. Target examples and model compatibility require separate qualification.
+See the [wire format and hash rules](agent-file.md#frozen-run-profile-export-unreleased).
+
 ### Local stdio MCP
 
 `kmx mcp --root /absolute/project` serves exactly `create`, `edit`, `run` and
@@ -313,7 +346,7 @@ configuration. The root must already exist; missing, relative or invalid roots
 refuse startup. There is no cwd, plugin-cache or client-roots fallback, and no
 tool can change the root. Host shell authority remains outside this boundary.
 
-Every tool input requires integer `schemaVersion: 1`. MCP initialization also
+Canonical tool input requires integer `schemaVersion: 1`. MCP initialization also
 negotiates its protocol version and advertises the engine build version.
 Stdout carries protocol only; no request/result logging or banners. Inbound
 frames are bounded to 2 MiB and source files to 256 KiB.
@@ -322,8 +355,56 @@ frames are bounded to 2 MiB and source files to 256 KiB.
 |---|---|---|
 | `create` | `path`, `content` | Saved root-relative path and exact-byte revision |
 | `edit` | `path`, `content`, `expectedRevision` | Saved path and new revision |
-| `run` | `path`; optional `input`, `caseId`, `showContent` | Shared `kmx.agent-file-preview` v1 result |
-| `test` | `path`; optional `caseId`, `showContent` | Same shared result, no ad-hoc input |
+| `run` | `path`; optional `input`, `caseId`, `showContent`, `showFailedContent` | Shared `kmx.agent-file-preview` v1 result |
+| `test` | `path`; optional `caseId`, `showContent`, `showFailedContent` | Same shared result, no ad-hoc input |
+
+#### Optional native Squad chat flow
+
+Trusted startup may add `--squad-program /absolute/qualified/squad --squad-release 1.1.0`
+(`squad.exe` on Windows). This selects a separately qualified standalone dependency;
+it does not install, authenticate or upgrade it. With neither flag, discovery,
+canonical v1 validation/results and v2 refusal remain unchanged. With both flags,
+the same four tools advertise a flat object schema for model-host compatibility,
+with separately enforced closed v1/v2 validation; no fifth tool or shell runner.
+Startup/discovery does not initialize the project or run a model.
+
+| Native v2 target | Tool | Additional input |
+|---|---|---|
+| `squad-members` | `create` | `lead`, `specialists` (0–7); each has `memberId`, native `role`, exact `displayRole`, `taskInstructions`, concrete `model`, fenced YAML `examples` |
+| `squad-member` | `edit` | `memberId`, `expectedRevision`, all owned `taskInstructions`, `model`, `examples` |
+| `squad-member` | `run` / `test` | `memberId`; optional `caseId`, `showContent`; Run additionally accepts `input` |
+
+Chat proposes and adjusts the team before effects. Approved native Create runs
+conditional `init --no-workflows --no-vscode-default`, then fixed cast and
+byte-preserving enrichment; users do not type Squad commands. Init creates native
+built-ins/state/templates/skills and local MCP configuration, and can append
+`.gitignore`/`.gitattributes`. New setup refuses prior `.mcp.json`, `.copilot`,
+`.github/skills`, linked targets, worktree pointers and partial/unsupported state;
+supported initialized roots are validated/reused, never reinitialized. The child
+has a bounded lifetime/private output and disabled personal lookup. It is trusted
+ambient execution, not a sandbox. Root-bound Git/environment policy prevents
+ancestor-root setup and origin/platform discovery; no npx dependency is installed.
+
+Native Create returns `kmx.squad-create` v2 with `result.setup`, per-member states,
+retained `changedPaths` and `effectsUnknown`. Acknowledged enrichment is not
+execution; inspect partial/unknown effects rather than auto-retrying or rolling
+back. Native Edit/Run/Test return a v2 `kmx.squad-member-operation`; Run/Test's
+`preview` is the existing safe App result. Completed assertion failures remain
+normal results, and subset pass is not full pass. Native real-model prompts retain
+native plus task instructions, excluding Examples; fake uses Task Instructions.
+No canonical file or missing native Purpose is synthesized.
+
+Read `kmx://squad-member/{memberId}` for current native-owned mapping and editable
+fields/revision. It revalidates the managed casting registry/history/commit,
+active ID/name/role, roster and charter under the configured release on every
+read and operation, including after restart. Failed validation shows
+**not set up by kmx** and disables native Edit/Run/Test. Valid state is not
+an authenticated origin claim, saved draft, prior pass or initial-enrichment
+receipt. There is no kmx-owned durable mapping. Native flow is chat-only; the
+existing canonical read-only canvas is unchanged. Member preview proves only the
+exact source revision, not a package digest, team dispatch or deployment.
+
+#### Canonical v1 file paths and publication
 
 Relative paths are portable root-level `<name>.agent.md` or
 `.squad/agents/<id>/charter.md`, without traversal or symlink components. Native
@@ -362,7 +443,11 @@ It identifies non-passing examples/assertions with safe reasons, preserves scope
 and any no-journal qualifier, and limits details to 10 rows within 8 KiB, reporting
 omitted rows. The full safe result remains in `structuredContent`.
 `showContent` is explicit and defaults false; answers and authored assertion
-operands are not included by default. Opt-in answer excerpts are bounded and
+operands are not included by default. Optional `showFailedContent` also defaults
+false and includes only validated failing saved-example answers, not passing,
+unknown or ad-hoc answers. Existing clients keep their current behavior. The
+canvas requests failure-only excerpts and keeps passing answers opt-in. These
+controls do not change existing runner journal retention. Excerpts are bounded and
 labeled untrusted data, never tool instructions. The result's display basename
 is not target authority.
 
@@ -373,12 +458,18 @@ Encode the whole root-relative path as one component, including slashes.
 Only supported agent paths under the fixed root are readable; there is no
 fifth tool, generic file read or directory listing. After root confirmation,
 authored content is visible without an extra consent mechanism; answer excerpts
-still require the existing `showContent` opt-in. A restart has no current result;
+require an explicit Run/Test disclosure option: `showContent` or failure-only
+`showFailedContent`. The optional authoring snapshot carries exact source from
+the same descriptor read as its revision; strict canonical parsing controls
+editability. A restart has no current result;
 a revision change marks the old observation stale and withholds its details.
 Reads perform no inference, mutation or journal retrieval.
 
 The [Copilot plugin](../plugins/copilot/README.md#read-only-agent-view) adds a
-native read-only canvas and `/agent-view PATH` text fallback over this resource.
+native authoring canvas and read-only `/agent-view PATH` text fallback over this
+resource. Canvas Edit/Test/Run use existing same-session MCP tools; only explicit
+Suggest more starts chat. Saves require the original revision; changed result
+revisions are labelled stale rather than silently rebasing the draft.
 Inspection can show a minimal titled agent as well as a canonical Squad charter;
 this display-only support does not change Run/Test parser acceptance.
 

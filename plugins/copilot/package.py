@@ -19,7 +19,8 @@ TARGETS = {"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "window
 MAX_BINARY = 512 << 20
 NATIVE_DIRECTORY = "com.github.copilot/extensions/agent-view"
 NATIVE_FILES = tuple(f"{NATIVE_DIRECTORY}/{name}" for name in
-                     ("extension.mjs", "view.mjs", "index.html", "app.js", "style.css"))
+                     ("extension.mjs", "view.mjs", "index.html", "app.js", "style.css", "authoring.mjs"))
+SAMPLE_FILES = ("samples/release-writer.agent.md", "try-it.json")
 
 
 def _quarantine(path: Path) -> None:
@@ -43,13 +44,31 @@ def _write_json(path: Path, value: dict) -> None:
     path.chmod(0o600)
 
 
+def squad_arguments(program: Path | None, release: str | None) -> list[str]:
+    """A local startup declaration, not a dependency install or authentication."""
+    if program is None and release is None:
+        return []
+    if program is None or release != "1.1.0" or not program.is_absolute():
+        raise ValueError("native Squad requires an absolute qualified program and release 1.1.0")
+    program = program.resolve(strict=True)
+    if (not program.is_file() or program.name not in ("squad", "squad.exe")
+            or any(ord(c) < 32 for c in str(program))
+            or any(token in str(program) for token in ("${PLUGIN_ROOT}", "${PLUGIN_DATA}"))):
+        raise ValueError("native Squad requires a separately qualified standalone launcher")
+    return ["--squad-program", str(program), "--squad-release", release]
+
+
 def build(*, binary: Path, sha256: str, target: str, root: Path | None,
-          output: Path, version: str) -> Path:
+          output: Path, version: str, squad_program: Path | None = None,
+          squad_release: str | None = None) -> Path:
     """Copy exactly the caller-pinned bytes without running the supplied engine.
 
     The SHA256 is caller input, not independent publisher authentication. The
     caller chooses the root before install; this is developer tooling only.
     """
+    native = squad_arguments(squad_program, squad_release)
+    if native and root is None:
+        raise ValueError("native Squad requires a configured operation root")
     if not re.fullmatch(r"[0-9a-f]{64}", sha256):
         raise ValueError("SHA256 must be 64 lowercase hex digits")
     if target not in TARGETS:
@@ -96,6 +115,7 @@ def build(*, binary: Path, sha256: str, target: str, root: Path | None,
     server["command"] = "./bin/" + name
     selected_root = str(root) if root is not None else "__SELECTED_ROOT__"
     server["args"][-1] = selected_root
+    server["args"].extend(native)
     # Hash and stage the same bytes, avoiding a second read of mutable input.
     with tempfile.TemporaryFile() as staged:
         digest = hashlib.sha256()
@@ -136,10 +156,11 @@ def build(*, binary: Path, sha256: str, target: str, root: Path | None,
             skill.mkdir(parents=True, mode=0o700)
             shutil.copyfile(HERE / "skills/kmx-agent-builder/SKILL.md", skill / "SKILL.md")
             (skill / "SKILL.md").chmod(0o600)
-            for name in NATIVE_FILES:
+            for name in (*NATIVE_FILES, *SAMPLE_FILES):
                 source = HERE / name
-                if source.is_symlink() or not source.is_file() or not 0 < source.stat().st_size <= 65536:
-                    raise ValueError("native canvas assets must be bounded regular files")
+                maximum = 256 << 10 if name in SAMPLE_FILES else 65536
+                if source.is_symlink() or not source.is_file() or not 0 < source.stat().st_size <= maximum:
+                    raise ValueError("bundled assets must be bounded regular files")
                 destination = output / name
                 destination.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
                 shutil.copyfile(source, destination)
@@ -159,10 +180,13 @@ def main() -> int:
                         help="explicit operation directory bound before fixture installation")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--squad-program", type=Path, help="optional separately qualified standalone Squad launcher; never bundled or installed")
+    parser.add_argument("--squad-release", help="qualified native release 1.1.0; requires --squad-program")
     options = parser.parse_args()
     try:
         result = build(binary=options.binary, sha256=options.sha256, target=options.platform,
-                       root=options.root, output=options.output, version=options.version)
+                       root=options.root, output=options.output, version=options.version,
+                       squad_program=options.squad_program, squad_release=options.squad_release)
     except (ValueError, OSError) as exc:
         print("plugin package refused: " + str(exc), file=sys.stderr)
         return 1
