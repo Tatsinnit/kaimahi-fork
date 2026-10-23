@@ -27,35 +27,74 @@ type fileDispositionInformationEx struct {
 func checkPrivateComponent(name string) error { return checkWindowsComponent(name) }
 
 func openExistingPrivateFileAt(ctx context.Context, parent *Directory, name string) (*PrivateFile, error) {
-	file, _, err := createPrivateFileAt(ctx, parent, name, windows.FILE_OPEN)
-	return file, err
+	return openExistingPrivateWindowsFileAt(ctx, parent, name, privateFileAccess)
 }
 
-func linkPrivateEntry(ctx context.Context, parent *Directory, stage, name, identity string) error {
-	if err := checkPrivateComponent(stage); err != nil {
-		return err
+func openExistingPrivateWindowsFileAt(ctx context.Context, parent *Directory, name string, access uint32) (*PrivateFile, error) {
+	if err := CheckSafeDirectory(ctx, parent, true); err != nil {
+		return nil, err
 	}
 	if err := checkPrivateComponent(name); err != nil {
-		return err
+		return nil, err
+	}
+	var handle windows.Handle
+	parentFile := rawObject(parent)
+	err := withHandle(parentFile, func(parentHandle windows.Handle) error {
+		if err := qualifyHandle(ctx, parentHandle, true); err != nil {
+			return err
+		}
+		opened, openErr := ntOpen(parentHandle, name, access, windows.FILE_NON_DIRECTORY_FILE)
+		if openErr != nil {
+			return openErr
+		}
+		if err := qualifyHandle(ctx, opened, false); err != nil {
+			windows.CloseHandle(opened)
+			return err
+		}
+		handle = opened
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	file := &PrivateFile{file: os.NewFile(uintptr(handle), childWindowsName(parentFile, name))}
+	if err := CheckPrivate(ctx, file, false); err != nil {
+		file.Close()
+		return nil, err
+	}
+	return file, nil
+}
+
+func linkPrivateEntry(ctx context.Context, parent *Directory, stage, name, identity string) (bool, error) {
+	if err := checkPrivateComponent(stage); err != nil {
+		return false, err
+	}
+	if err := checkPrivateComponent(name); err != nil {
+		return false, err
 	}
 	opened, err := openExistingPrivateFileAt(ctx, parent, stage)
 	if err != nil {
-		return err
+		return false, err
 	}
-	defer opened.Close()
 	got, err := PhysicalIdentity(ctx, opened)
-	if err != nil || got != identity {
-		return unsafeCause("private stage identity changed")
+	if err != nil {
+		closeErr := opened.Close()
+		return false, errors.Join(err, closeErr)
+	}
+	if got != identity {
+		closeErr := opened.Close()
+		return false, errors.Join(unsafeCause("private stage identity changed"), closeErr)
 	}
 	encoded, err := windows.UTF16FromString(name)
 	if err != nil || len(encoded) > windows.MAX_PATH {
-		return unsafeCause("publication name is too long")
+		closeErr := opened.Close()
+		return false, errors.Join(unsafeCause("publication name is too long"), closeErr)
 	}
 	info := fileLinkInformation{RootDirectory: windows.InvalidHandle}
 	copy(info.FileName[:], encoded)
 	info.FileNameLength = uint32((len(encoded) - 1) * 2)
 	parentFile := rawObject(parent)
-	err = withHandle(parentFile, func(parentHandle windows.Handle) error {
+	linkErr := withHandle(parentFile, func(parentHandle windows.Handle) error {
 		info.RootDirectory = parentHandle
 		return withHandle(rawObject(opened), func(stageHandle windows.Handle) error {
 			var status windows.IO_STATUS_BLOCK
@@ -70,18 +109,27 @@ func linkPrivateEntry(ctx context.Context, parent *Directory, stage, name, ident
 			return err
 		})
 	})
-	return err
+	closeErr := opened.Close()
+	if linkErr == nil {
+		return true, closeErr
+	}
+	visible, observedErr := observedPrivateEntry(ctx, parent, name, identity, linkErr)
+	return visible, errors.Join(observedErr, closeErr)
 }
 
 func removePrivateEntry(ctx context.Context, parent *Directory, name, identity string) error {
-	opened, err := openExistingPrivateFileAt(ctx, parent, name)
+	opened, err := openExistingPrivateWindowsFileAt(ctx, parent, name, privateFileCreate)
 	if err != nil {
 		return err
 	}
 	got, err := PhysicalIdentity(ctx, opened)
-	if err != nil || got != identity {
-		_ = opened.Close()
-		return unsafeCause("private stage identity changed")
+	if err != nil {
+		closeErr := opened.Close()
+		return errors.Join(err, closeErr)
+	}
+	if got != identity {
+		closeErr := opened.Close()
+		return errors.Join(unsafeCause("private stage identity changed"), closeErr)
 	}
 	removeErr := withHandle(rawObject(opened), func(handle windows.Handle) error {
 		info := fileDispositionInformationEx{Flags: windows.FILE_DISPOSITION_DELETE |

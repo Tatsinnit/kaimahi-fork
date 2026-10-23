@@ -36,40 +36,46 @@ func openExistingPrivateFileAt(ctx context.Context, parent *Directory, name stri
 	return private, nil
 }
 
-func linkPrivateEntry(ctx context.Context, parent *Directory, stage, name, identity string) error {
+func linkPrivateEntry(ctx context.Context, parent *Directory, stage, name, identity string) (bool, error) {
 	if err := checkPrivateComponent(stage); err != nil {
-		return err
+		return false, err
 	}
 	if err := checkPrivateComponent(name); err != nil {
-		return err
+		return false, err
 	}
 	opened, err := openExistingPrivateFileAt(ctx, parent, stage)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer opened.Close()
 	got, err := PhysicalIdentity(ctx, opened)
-	if err != nil || got != identity {
-		return unsafeCause("private stage identity changed")
+	if err != nil {
+		return false, err
+	}
+	if got != identity {
+		return false, unsafeCause("private stage identity changed")
 	}
 	raw := rawObject(parent)
 	if raw == nil {
-		return unsafeCause("parent handle is absent")
+		return false, unsafeCause("parent handle is absent")
 	}
 	conn, err := raw.SyscallConn()
 	if err != nil {
-		return err
+		return false, err
 	}
 	var linkErr error
 	if err := conn.Control(func(fd uintptr) {
 		linkErr = unix.Linkat(int(fd), stage, int(fd), name, 0)
 	}); err != nil {
-		return err
+		return false, err
 	}
 	if errors.Is(linkErr, os.ErrExist) {
-		return unsafeCause("publication destination already exists")
+		return observedPrivateEntry(ctx, parent, name, identity, unsafeCause("publication destination already exists"))
 	}
-	return linkErr
+	if linkErr != nil {
+		return observedPrivateEntry(ctx, parent, name, identity, linkErr)
+	}
+	return true, nil
 }
 
 func removePrivateEntry(ctx context.Context, parent *Directory, name, identity string) error {

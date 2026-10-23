@@ -84,7 +84,10 @@ func (f *File) ReadAt(p []byte, offset int64) (int, error) {
 // PrivateFile is an existing protected owner-only regular file opened for
 // package-managed mutation or locking. It deliberately exposes no raw
 // descriptor, writer, truncation, rename, delete, or sync method.
-type PrivateFile struct{ file *os.File }
+type PrivateFile struct {
+	file     *os.File
+	identity string
+}
 
 func (f *PrivateFile) fileaccessObject() *os.File {
 	if f == nil {

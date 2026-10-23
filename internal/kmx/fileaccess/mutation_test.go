@@ -203,7 +203,7 @@ func TestPublishPrivateFaultBoundaries(t *testing.T) {
 	t.Run("link-before-visibility", func(t *testing.T) {
 		path, directory := privateTestDirectory(t)
 		oldLink := linkPublishedEntry
-		linkPublishedEntry = func(context.Context, *Directory, string, string, string) error { return injected }
+		linkPublishedEntry = func(context.Context, *Directory, string, string, string) (bool, error) { return false, injected }
 		t.Cleanup(func() { linkPublishedEntry = oldLink })
 		result, err := PublishPrivate(t.Context(), directory, "result", []byte("complete"))
 		if err == nil || result.Visible {
@@ -211,6 +211,27 @@ func TestPublishPrivateFaultBoundaries(t *testing.T) {
 		}
 		if _, statErr := os.Lstat(filepath.Join(path, "result")); !errors.Is(statErr, os.ErrNotExist) {
 			t.Fatalf("link failure published output: %v", statErr)
+		}
+	})
+
+	t.Run("link-error-after-visibility", func(t *testing.T) {
+		path, directory := privateTestDirectory(t)
+		oldLink := linkPublishedEntry
+		linkPublishedEntry = func(ctx context.Context, directory *Directory, stage, name, identity string) (bool, error) {
+			visible, err := oldLink(ctx, directory, stage, name, identity)
+			if err != nil {
+				return visible, err
+			}
+			return true, injected
+		}
+		t.Cleanup(func() { linkPublishedEntry = oldLink })
+		result, err := PublishPrivate(t.Context(), directory, "result", []byte("complete"))
+		if err == nil || !result.Visible {
+			t.Fatalf("post-effect link error = %+v, %v", result, err)
+		}
+		data, readErr := os.ReadFile(filepath.Join(path, "result"))
+		if readErr != nil || string(data) != "complete" {
+			t.Fatalf("post-effect link output = %q, %v", data, readErr)
 		}
 	})
 
@@ -280,12 +301,12 @@ func TestPublishPrivateFaultBoundaries(t *testing.T) {
 		path, directory := privateTestDirectory(t)
 		ctx, cancel := context.WithCancel(context.Background())
 		oldLink := linkPublishedEntry
-		linkPublishedEntry = func(ctx context.Context, directory *Directory, stage, name, identity string) error {
-			err := oldLink(ctx, directory, stage, name, identity)
+		linkPublishedEntry = func(ctx context.Context, directory *Directory, stage, name, identity string) (bool, error) {
+			visible, err := oldLink(ctx, directory, stage, name, identity)
 			if err == nil {
 				cancel()
 			}
-			return err
+			return visible, err
 		}
 		t.Cleanup(func() { linkPublishedEntry = oldLink })
 		result, err := PublishPrivate(ctx, directory, "result", []byte("complete"))

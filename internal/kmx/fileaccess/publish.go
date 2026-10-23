@@ -86,10 +86,11 @@ func PublishPrivate(ctx context.Context, directory *Directory, name string, data
 	if err := CheckPrivate(ctx, directory, true); err != nil {
 		return result, wrapAccess("publish private file", err)
 	}
-	if err := linkPublishedEntry(ctx, directory, stage, name, identity); err != nil {
-		return result, wrapAccess("publish private file", err)
+	visible, linkErr := linkPublishedEntry(ctx, directory, stage, name, identity)
+	result.Visible = visible
+	if linkErr != nil {
+		return result, wrapAccess("publish private file", linkErr)
 	}
-	result.Visible = true
 	if err := requirePrivateEntryIdentity(ctx, directory, name, identity); err != nil {
 		return result, wrapAccess("verify published file", err)
 	}
@@ -135,12 +136,11 @@ func createPublicationStage(ctx context.Context, directory *Directory) (string, 
 			}
 			return "", nil, "", err
 		}
-		identity, err := PhysicalIdentity(ctx, file)
-		if err != nil {
-			file.Close()
-			return "", nil, "", err
+		if file.identity == "" {
+			closeErr := file.Close()
+			return "", nil, "", creationFailure(unreadableCause("created private file identity is unavailable"), closeErr)
 		}
-		return name, file, identity, nil
+		return name, file, file.identity, nil
 	}
 	return "", nil, "", unsafeCause("private stage names collided")
 }
@@ -159,4 +159,15 @@ func requirePrivateEntryIdentity(ctx context.Context, directory *Directory, name
 		return unsafeCause("private entry identity changed")
 	}
 	return nil
+}
+
+func observedPrivateEntry(ctx context.Context, directory *Directory, name, identity string, effectErr error) (bool, error) {
+	err := requirePrivateEntryIdentity(ctx, directory, name, identity)
+	if err == nil {
+		return true, effectErr
+	}
+	if errors.Is(err, ErrMissing) {
+		return false, effectErr
+	}
+	return false, errors.Join(effectErr, err)
 }

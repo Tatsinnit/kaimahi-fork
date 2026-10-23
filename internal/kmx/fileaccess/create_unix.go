@@ -51,8 +51,15 @@ func createPrivateFileAt(ctx context.Context, parent *Directory, name string) (*
 	if err := CheckPrivate(ctx, private, false); err != nil {
 		removeErr := discardCreatedFile(parent, name)
 		closeErr := file.Close()
-		return nil, wrapAccess("open private file", errors.Join(err, removeErr, closeErr))
+		return nil, wrapAccess("open private file", creationFailure(err, removeErr, closeErr))
 	}
+	identity, err := PhysicalIdentity(ctx, private)
+	if err != nil {
+		removeErr := discardCreatedFile(parent, name)
+		closeErr := file.Close()
+		return nil, wrapAccess("open private file", creationFailure(err, removeErr, closeErr))
+	}
+	private.identity = identity
 	return private, nil
 }
 
@@ -122,7 +129,7 @@ func createPrivateDirectoryAt(ctx context.Context, parent *Directory, name strin
 	if err := CheckPrivate(ctx, directory, true); err != nil {
 		removeErr := discardCreatedDirectory(parent, name)
 		closeErr := directory.Close()
-		return nil, wrapAccess("open private directory", errors.Join(err, removeErr, closeErr))
+		return nil, wrapAccess("open private directory", creationFailure(err, removeErr, closeErr))
 	}
 	return directory, nil
 }

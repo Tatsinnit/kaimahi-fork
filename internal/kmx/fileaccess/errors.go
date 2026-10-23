@@ -73,7 +73,8 @@ func wrapAccess(operation string, err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return context.DeadlineExceeded
 	}
-	if access, ok := err.(*AccessError); ok {
+	var access *AccessError
+	if errors.As(err, &access) {
 		return &AccessError{Operation: operation, Class: access.Class, cause: access.cause}
 	}
 	var classified *classifiedCause
@@ -105,6 +106,13 @@ func (e *classifiedCause) Is(target error) bool { return target == classError(e.
 func unsafeCause(reason string) error { return &classifiedCause{class: ClassUnsafe, reason: reason} }
 func unreadableCause(reason string) error {
 	return &classifiedCause{class: ClassUnreadable, reason: reason}
+}
+
+func creationFailure(primary error, cleanup ...error) error {
+	if errors.Join(cleanup...) != nil {
+		return unreadableCause("private creation cleanup is uncertain")
+	}
+	return primary
 }
 
 func checkContext(ctx context.Context) error {
