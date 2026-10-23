@@ -5,6 +5,7 @@ package fileaccess
 import (
 	"context"
 	"errors"
+	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -108,4 +109,44 @@ func TestUnixCancellationAfterCreateRetiresOwnedObjects(t *testing.T) {
 			t.Fatalf("cancelled stage remains: %v, %v", entries, readErr)
 		}
 	})
+}
+
+func TestUnixEnsurePrivateFileConcurrentCreateFallbackIsWrapped(t *testing.T) {
+	path, directory := privateTestDirectory(t)
+	oldBefore := beforeUnixPrivateFileCreate
+	beforeUnixPrivateFileCreate = func() {
+		beforeUnixPrivateFileCreate = func() {}
+		if err := os.WriteFile(filepath.Join(path, "race"), []byte("keep"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(filepath.Join(path, "race"), 0o400); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { beforeUnixPrivateFileCreate = oldBefore })
+	file, err := EnsurePrivateFileAt(t.Context(), directory, "race")
+	if file != nil {
+		file.Close()
+	}
+	if !errors.Is(err, ErrUnreadable) {
+		t.Fatalf("concurrent fallback = %v, want unreadable", err)
+	}
+	var access *AccessError
+	if !errors.As(err, &access) || access.Operation != "open private file" {
+		t.Fatalf("concurrent fallback = %#v, %v", access, err)
+	}
+}
+
+func TestUnixFailedLinkWithAbsentDestinationPreservesFailureClass(t *testing.T) {
+	_, directory := privateTestDirectory(t)
+	oldLink := linkPublishedEntry
+	linkPublishedEntry = func(ctx context.Context, parent *Directory, stage, name, identity string) (bool, error) {
+		visible, err := observedPrivateEntry(context.WithoutCancel(ctx), parent, name, identity, unix.ENOSPC)
+		return visible, err
+	}
+	t.Cleanup(func() { linkPublishedEntry = oldLink })
+	result, err := PublishPrivate(t.Context(), directory, "result", []byte("complete"))
+	if result.Visible || !errors.Is(err, ErrUnreadable) || errors.Is(err, ErrMissing) {
+		t.Fatalf("absent failed link = %+v, %v", result, err)
+	}
 }

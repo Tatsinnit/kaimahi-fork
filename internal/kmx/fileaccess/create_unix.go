@@ -17,6 +17,7 @@ const privateFileFlags = unix.O_RDWR | unix.O_NOFOLLOW | unix.O_NONBLOCK | unix.
 var (
 	afterUnixPrivateFileCreate      = func() {}
 	afterUnixPrivateDirectoryCreate = func() {}
+	beforeUnixPrivateFileCreate     = func() {}
 )
 
 // CreatePrivateFileAt exclusively creates a protected owner-only regular file
@@ -37,7 +38,7 @@ func EnsurePrivateFileAt(ctx context.Context, parent *Directory, name string) (*
 	if errors.Is(err, errEntryExists) {
 		file, err = openExistingPrivateFileAt(ctx, parent, name)
 	}
-	return file, err
+	return file, wrapAccess("open private file", err)
 }
 
 func createPrivateFileAt(ctx context.Context, parent *Directory, name string) (*PrivateFile, error) {
@@ -60,6 +61,7 @@ func createPrivateFileAt(ctx context.Context, parent *Directory, name string) (*
 	}
 	fd := -1
 	var createErr error
+	beforeUnixPrivateFileCreate()
 	if err := conn.Control(func(dirfd uintptr) {
 		fd, createErr = unix.Openat(int(dirfd), name, privateFileFlags|unix.O_CREAT|unix.O_EXCL, 0o600)
 	}); err != nil {

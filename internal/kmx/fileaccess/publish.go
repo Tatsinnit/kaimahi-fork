@@ -167,7 +167,7 @@ func requirePrivateEntryIdentity(ctx context.Context, directory *Directory, name
 func observePrivateEntryIdentity(ctx context.Context, directory *Directory, name, identity string) (bool, error) {
 	file, err := openExistingPrivateFileAt(ctx, directory, name)
 	if err != nil {
-		return false, err
+		return false, wrapAccess("observe private entry", err)
 	}
 	got, identityErr := PhysicalIdentity(ctx, file)
 	closeErr := closeObservedFile(file)
