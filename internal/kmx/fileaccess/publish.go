@@ -29,6 +29,7 @@ var (
 	linkPublishedEntry = linkPrivateEntry
 	removeStagedEntry  = removePrivateEntry
 	syncPublishedDir   = SyncDirectory
+	closeObservedFile  = func(file *PrivateFile) error { return file.Close() }
 )
 
 // PublishPrivate writes complete private bytes and publishes name exactly once
@@ -153,25 +154,40 @@ func createPublicationStage(ctx context.Context, directory *Directory) (string, 
 }
 
 func requirePrivateEntryIdentity(ctx context.Context, directory *Directory, name, identity string) error {
-	file, err := openExistingPrivateFileAt(ctx, directory, name)
+	matched, err := observePrivateEntryIdentity(ctx, directory, name, identity)
 	if err != nil {
 		return err
 	}
-	got, identityErr := PhysicalIdentity(ctx, file)
-	closeErr := file.Close()
-	if identityErr != nil || closeErr != nil {
-		return errors.Join(identityErr, closeErr)
-	}
-	if got != identity {
+	if !matched {
 		return unsafeCause("private entry identity changed")
 	}
 	return nil
 }
 
+func observePrivateEntryIdentity(ctx context.Context, directory *Directory, name, identity string) (bool, error) {
+	file, err := openExistingPrivateFileAt(ctx, directory, name)
+	if err != nil {
+		return false, err
+	}
+	got, identityErr := PhysicalIdentity(ctx, file)
+	closeErr := closeObservedFile(file)
+	if identityErr != nil {
+		return false, creationFailure(identityErr, closeErr)
+	}
+	matched := got == identity
+	if closeErr != nil {
+		return matched, unreadableCause("private identity observation close is uncertain")
+	}
+	return matched, nil
+}
+
 func observedPrivateEntry(ctx context.Context, directory *Directory, name, identity string, effectErr error) (bool, error) {
-	err := requirePrivateEntryIdentity(ctx, directory, name, identity)
+	matched, err := observePrivateEntryIdentity(ctx, directory, name, identity)
+	if matched {
+		return true, errors.Join(effectErr, err)
+	}
 	if err == nil {
-		return true, effectErr
+		return false, errors.Join(effectErr, unsafeCause("published entry identifies a different object"))
 	}
 	if errors.Is(err, ErrMissing) {
 		return false, effectErr

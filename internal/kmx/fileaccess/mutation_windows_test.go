@@ -205,3 +205,34 @@ func TestWindowsLinkErrorAfterEffectReconcilesWithoutCallerContext(t *testing.T)
 		t.Fatalf("reconciled visible output = %q, %v", data, readErr)
 	}
 }
+
+func TestWindowsLinkErrorObservationClosePreservesVisibility(t *testing.T) {
+	path, directory := privateTestDirectory(t)
+	oldSet := setPrivateLinkInformation
+	oldClose := closeObservedFile
+	setPrivateLinkInformation = func(handle windows.Handle, status *windows.IO_STATUS_BLOCK, info *byte, size uint32) error {
+		err := oldSet(handle, status, info, size)
+		if err == nil {
+			return windows.ERROR_GEN_FAILURE
+		}
+		return err
+	}
+	closeObservedFile = func(file *PrivateFile) error {
+		if err := oldClose(file); err != nil {
+			return err
+		}
+		return errors.New("injected observation close failure")
+	}
+	t.Cleanup(func() {
+		setPrivateLinkInformation = oldSet
+		closeObservedFile = oldClose
+	})
+	result, err := PublishPrivate(t.Context(), directory, "result", []byte("complete"))
+	if err == nil || !result.Visible || !errors.Is(err, ErrUnreadable) {
+		t.Fatalf("post-effect observation close = %+v, %v", result, err)
+	}
+	data, readErr := os.ReadFile(filepath.Join(path, "result"))
+	if readErr != nil || string(data) != "complete" {
+		t.Fatalf("visible output after close failure = %q, %v", data, readErr)
+	}
+}
