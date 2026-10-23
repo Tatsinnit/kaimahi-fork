@@ -14,6 +14,11 @@ import (
 
 const privateFileFlags = unix.O_RDWR | unix.O_NOFOLLOW | unix.O_NONBLOCK | unix.O_CLOEXEC
 
+var (
+	afterUnixPrivateFileCreate      = func() {}
+	afterUnixPrivateDirectoryCreate = func() {}
+)
+
 // CreatePrivateFileAt exclusively creates a protected owner-only regular file
 // immediately below parent.
 func CreatePrivateFileAt(ctx context.Context, parent *Directory, name string) (*PrivateFile, error) {
@@ -39,25 +44,48 @@ func createPrivateFileAt(ctx context.Context, parent *Directory, name string) (*
 	if err := CheckSafeDirectory(ctx, parent, true); err != nil {
 		return nil, wrapAccess("open private file", err)
 	}
-	flags := privateFileFlags | unix.O_CREAT | unix.O_EXCL
-	file, err := openAtMode(ctx, rawObject(parent), name, flags, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			err = &classifiedCause{class: ClassUnsafe, cause: errEntryExists, reason: "private file already exists"}
-		}
+	if !singleUnixComponent(name) {
+		return nil, wrapAccess("open private file", unsafeCause("entry name is not one component"))
+	}
+	if err := checkContext(ctx); err != nil {
 		return nil, wrapAccess("open private file", err)
 	}
+	parentFile := rawObject(parent)
+	if parentFile == nil {
+		return nil, wrapAccess("open private file", unsafeCause("parent handle is absent"))
+	}
+	conn, err := parentFile.SyscallConn()
+	if err != nil {
+		return nil, wrapAccess("open private file", unreadableCause("parent handle is unavailable"))
+	}
+	fd := -1
+	var createErr error
+	if err := conn.Control(func(dirfd uintptr) {
+		fd, createErr = unix.Openat(int(dirfd), name, privateFileFlags|unix.O_CREAT|unix.O_EXCL, 0o600)
+	}); err != nil {
+		return nil, wrapAccess("open private file", err)
+	}
+	if createErr != nil {
+		if errors.Is(createErr, os.ErrExist) {
+			createErr = &classifiedCause{class: ClassUnsafe, cause: errEntryExists, reason: "private file already exists"}
+		}
+		return nil, wrapAccess("open private file", createErr)
+	}
+	file := os.NewFile(uintptr(fd), filepath.Join(parentFile.Name(), name))
 	private := &PrivateFile{file: file}
+	afterUnixPrivateFileCreate()
+	if err := checkContext(ctx); err != nil {
+		cleanupErr := cleanupCreatedUnixObject(context.WithoutCancel(ctx), parent, name, private, false)
+		return nil, wrapAccess("open private file", creationFailure(err, cleanupErr))
+	}
 	if err := CheckPrivate(ctx, private, false); err != nil {
-		removeErr := discardCreatedFile(parent, name)
-		closeErr := file.Close()
-		return nil, wrapAccess("open private file", creationFailure(err, removeErr, closeErr))
+		cleanupErr := cleanupCreatedUnixObject(context.WithoutCancel(ctx), parent, name, private, false)
+		return nil, wrapAccess("open private file", creationFailure(err, cleanupErr))
 	}
 	identity, err := PhysicalIdentity(ctx, private)
 	if err != nil {
-		removeErr := discardCreatedFile(parent, name)
-		closeErr := file.Close()
-		return nil, wrapAccess("open private file", creationFailure(err, removeErr, closeErr))
+		cleanupErr := cleanupCreatedUnixObject(context.WithoutCancel(ctx), parent, name, private, false)
+		return nil, wrapAccess("open private file", creationFailure(err, cleanupErr))
 	}
 	private.identity = identity
 	return private, nil
@@ -122,14 +150,19 @@ func createPrivateDirectoryAt(ctx context.Context, parent *Directory, name strin
 		}
 		return nil, wrapAccess("open private directory", mkdirErr)
 	}
-	directory, err := OpenDirectoryAt(ctx, parent, name)
+	afterUnixPrivateDirectoryCreate()
+	cleanupCtx := context.WithoutCancel(ctx)
+	directory, err := OpenDirectoryAt(cleanupCtx, parent, name)
 	if err != nil {
-		return nil, wrapAccess("open private directory", err)
+		return nil, wrapAccess("open private directory", unreadableCause("private directory creation cannot be verified"))
+	}
+	if err := checkContext(ctx); err != nil {
+		cleanupErr := cleanupCreatedUnixObject(cleanupCtx, parent, name, directory, true)
+		return nil, wrapAccess("open private directory", creationFailure(err, cleanupErr))
 	}
 	if err := CheckPrivate(ctx, directory, true); err != nil {
-		removeErr := discardCreatedDirectory(parent, name)
-		closeErr := directory.Close()
-		return nil, wrapAccess("open private directory", creationFailure(err, removeErr, closeErr))
+		cleanupErr := cleanupCreatedUnixObject(cleanupCtx, parent, name, directory, true)
+		return nil, wrapAccess("open private directory", creationFailure(err, cleanupErr))
 	}
 	return directory, nil
 }
@@ -234,4 +267,46 @@ func discardUnixEntry(parent *Directory, name string, flags int) error {
 		return err
 	}
 	return removeErr
+}
+
+func cleanupCreatedUnixObject(ctx context.Context, parent *Directory, name string, created Object, directory bool) error {
+	identity, err := PhysicalIdentity(ctx, created)
+	if err != nil {
+		closeErr := rawObject(created).Close()
+		return errors.Join(err, closeErr)
+	}
+	var current Object
+	if directory {
+		opened, openErr := OpenDirectoryAt(ctx, parent, name)
+		if openErr != nil {
+			closeErr := rawObject(created).Close()
+			return errors.Join(openErr, closeErr)
+		}
+		current = opened
+	} else {
+		opened, openErr := openExistingPrivateFileAt(ctx, parent, name)
+		if openErr != nil {
+			closeErr := rawObject(created).Close()
+			return errors.Join(openErr, closeErr)
+		}
+		current = opened
+	}
+	currentID, identityErr := PhysicalIdentity(ctx, current)
+	if identityErr != nil || currentID != identity {
+		currentCloseErr := rawObject(current).Close()
+		createdCloseErr := rawObject(created).Close()
+		if identityErr == nil {
+			identityErr = unsafeCause("created object identity changed")
+		}
+		return errors.Join(identityErr, currentCloseErr, createdCloseErr)
+	}
+	var removeErr error
+	if directory {
+		removeErr = discardCreatedDirectory(parent, name)
+	} else {
+		removeErr = discardCreatedFile(parent, name)
+	}
+	currentCloseErr := rawObject(current).Close()
+	createdCloseErr := rawObject(created).Close()
+	return errors.Join(removeErr, currentCloseErr, createdCloseErr)
 }
