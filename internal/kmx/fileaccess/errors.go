@@ -22,6 +22,7 @@ var (
 	ErrUnsafe      = errors.New("unsafe filesystem state")
 	ErrUnsupported = errors.New("unsupported filesystem")
 	ErrUnreadable  = errors.New("filesystem state unreadable")
+	errEntryExists = errors.New("filesystem entry already exists")
 )
 
 // AccessError exposes a fixed operation and exclusive category, never a caller
@@ -41,6 +42,9 @@ func (e *AccessError) Is(target error) bool {
 		return true
 	}
 	if e.Class == ClassMissing && target == fs.ErrNotExist {
+		return true
+	}
+	if target == errEntryExists && errors.Is(e.cause, target) {
 		return true
 	}
 	return e.Class == ClassUnreadable && target == fs.ErrPermission && errors.Is(e.cause, fs.ErrPermission)
