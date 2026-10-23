@@ -30,9 +30,15 @@ func openExistingPrivateFileAt(ctx context.Context, parent *Directory, name stri
 	}
 	private := &PrivateFile{file: file}
 	if err := CheckPrivate(ctx, private, false); err != nil {
-		file.Close()
-		return nil, err
+		closeErr := file.Close()
+		return nil, creationFailure(err, closeErr)
 	}
+	identity, err := PhysicalIdentity(ctx, private)
+	if err != nil {
+		closeErr := file.Close()
+		return nil, creationFailure(err, closeErr)
+	}
+	private.identity = identity
 	return private, nil
 }
 
@@ -73,7 +79,7 @@ func linkPrivateEntry(ctx context.Context, parent *Directory, stage, name, ident
 		return observedPrivateEntry(ctx, parent, name, identity, unsafeCause("publication destination already exists"))
 	}
 	if linkErr != nil {
-		return observedPrivateEntry(ctx, parent, name, identity, linkErr)
+		return observedPrivateEntry(context.WithoutCancel(ctx), parent, name, identity, linkErr)
 	}
 	return true, nil
 }

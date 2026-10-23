@@ -48,13 +48,13 @@ func CreatePrivateFileAt(ctx context.Context, parent *Directory, name string) (*
 func EnsurePrivateFileAt(ctx context.Context, parent *Directory, name string) (*PrivateFile, error) {
 	file, err := openExistingPrivateFileAt(ctx, parent, name)
 	if err == nil || !errors.Is(err, os.ErrNotExist) {
-		return file, err
+		return file, wrapAccess("open private file", err)
 	}
 	file, err = createPrivateFileAt(ctx, parent, name)
 	if errors.Is(err, errEntryExists) {
-		return openExistingPrivateFileAt(ctx, parent, name)
+		file, err = openExistingPrivateFileAt(ctx, parent, name)
 	}
-	return file, err
+	return file, wrapAccess("open private file", err)
 }
 
 func createPrivateFileAt(ctx context.Context, parent *Directory, name string) (*PrivateFile, error) {
@@ -106,12 +106,13 @@ func createPrivateFileAt(ctx context.Context, parent *Directory, name string) (*
 		return nil, wrapAccess("open private file", creationFailure(err, discardCreatedWindowsFile(creatorFile)))
 	}
 	if err := requireObjectIdentity(ctx, retained, identity); err != nil {
-		retained.Close()
-		return nil, wrapAccess("open private file", creationFailure(err, discardCreatedWindowsFile(creatorFile)))
+		retainedCloseErr := retained.Close()
+		return nil, wrapAccess("open private file", creationFailure(err, retainedCloseErr, discardCreatedWindowsFile(creatorFile)))
 	}
 	if err := creatorFile.Close(); err != nil {
-		retained.Close()
-		return nil, wrapAccess("open private file", err)
+		retainedCloseErr := retained.Close()
+		cleanupErr := cleanupCreatedWindowsEntry(context.WithoutCancel(ctx), parent, name, identity, false)
+		return nil, wrapAccess("open private file", creationFailure(err, retainedCloseErr, cleanupErr))
 	}
 	retained.identity = identity
 	return retained, nil
@@ -128,13 +129,13 @@ func CreatePrivateDirectoryAt(ctx context.Context, parent *Directory, name strin
 func EnsurePrivateDirectoryAt(ctx context.Context, parent *Directory, name string) (*Directory, error) {
 	directory, err := openExistingPrivateDirectoryAt(ctx, parent, name)
 	if err == nil || !errors.Is(err, os.ErrNotExist) {
-		return directory, err
+		return directory, wrapAccess("open private directory", err)
 	}
 	directory, err = createPrivateDirectoryAt(ctx, parent, name)
 	if errors.Is(err, errEntryExists) {
-		return openExistingPrivateDirectoryAt(ctx, parent, name)
+		directory, err = openExistingPrivateDirectoryAt(ctx, parent, name)
 	}
-	return directory, err
+	return directory, wrapAccess("open private directory", err)
 }
 
 func createPrivateDirectoryAt(ctx context.Context, parent *Directory, name string) (*Directory, error) {
@@ -190,12 +191,13 @@ func createPrivateDirectoryAtQualified(ctx context.Context, parent *Directory, n
 		return nil, wrapAccess("open private directory", creationFailure(err, discardCreatedWindowsFile(creatorFile)))
 	}
 	if err := requireObjectIdentity(ctx, retained, identity); err != nil {
-		retained.Close()
-		return nil, wrapAccess("open private directory", creationFailure(err, discardCreatedWindowsFile(creatorFile)))
+		retainedCloseErr := retained.Close()
+		return nil, wrapAccess("open private directory", creationFailure(err, retainedCloseErr, discardCreatedWindowsFile(creatorFile)))
 	}
 	if err := creatorFile.Close(); err != nil {
-		retained.Close()
-		return nil, wrapAccess("open private directory", err)
+		retainedCloseErr := retained.Close()
+		cleanupErr := cleanupCreatedWindowsEntry(context.WithoutCancel(ctx), parent, name, identity, true)
+		return nil, wrapAccess("open private directory", creationFailure(err, retainedCloseErr, cleanupErr))
 	}
 	return retained, nil
 }
@@ -307,8 +309,49 @@ func openExistingPrivateDirectoryAt(ctx context.Context, parent *Directory, name
 		return nil, err
 	}
 	if err := CheckPrivate(ctx, directory, true); err != nil {
-		directory.Close()
-		return nil, err
+		closeErr := directory.Close()
+		return nil, creationFailure(err, closeErr)
 	}
 	return directory, nil
+}
+
+func cleanupCreatedWindowsEntry(ctx context.Context, parent *Directory, name, identity string, directory bool) error {
+	options := uint32(windows.FILE_NON_DIRECTORY_FILE)
+	if directory {
+		options = windows.FILE_DIRECTORY_FILE
+	}
+	var handle windows.Handle
+	parentFile := rawObject(parent)
+	err := withHandle(parentFile, func(parentHandle windows.Handle) error {
+		opened, openErr := ntOpen(parentHandle, name,
+			windows.DELETE|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL, options)
+		if openErr != nil {
+			return openErr
+		}
+		if err := qualifyHandle(ctx, opened, directory); err != nil {
+			closeErr := windows.CloseHandle(opened)
+			return creationFailure(err, closeErr)
+		}
+		handle = opened
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	file := os.NewFile(uintptr(handle), childWindowsName(parentFile, name))
+	var object Object = &PrivateFile{file: file}
+	if directory {
+		object = &Directory{file: file}
+	}
+	if err := CheckPrivate(ctx, object, directory); err != nil {
+		closeErr := file.Close()
+		return creationFailure(err, closeErr)
+	}
+	if err := requireObjectIdentity(ctx, object, identity); err != nil {
+		closeErr := file.Close()
+		return creationFailure(err, closeErr)
+	}
+	removeErr := withHandle(file, discardWindowsHandle)
+	closeErr := file.Close()
+	return errors.Join(removeErr, closeErr)
 }

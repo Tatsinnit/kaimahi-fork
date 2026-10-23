@@ -25,6 +25,7 @@ var (
 		return err
 	}
 	syncPrivateFile    = func(file *PrivateFile) error { return file.file.Sync() }
+	afterPrivateLink   = func() error { return nil }
 	linkPublishedEntry = linkPrivateEntry
 	removeStagedEntry  = removePrivateEntry
 	syncPublishedDir   = SyncDirectory
@@ -52,17 +53,20 @@ func PublishPrivate(ctx context.Context, directory *Directory, name string, data
 	stagePresent := true
 	stageRemovalAttempted := false
 	defer func() {
+		var cleanupErr error
 		if file != nil {
 			if closeErr := file.Close(); closeErr != nil {
-				err = errors.Join(err, wrapAccess("close private stage", closeErr))
+				cleanupErr = errors.Join(cleanupErr, closeErr)
 			}
 		}
 		if stagePresent && !stageRemovalAttempted {
 			if removeErr := removeStagedEntry(context.Background(), directory, stage, identity); removeErr != nil {
-				// A linked final name is complete and must remain visible. Failure
-				// to retire the private stage is still an uncertain publication.
-				err = errors.Join(err, wrapAccess("retire private stage", removeErr))
+				cleanupErr = errors.Join(cleanupErr, removeErr)
 			}
+		}
+		if cleanupErr != nil {
+			err = wrapPublicationError(result.Visible, unreadableCause("private publication cleanup is uncertain"))
+			return
 		}
 		if err != nil {
 			err = wrapPublicationError(result.Visible, err)
@@ -88,6 +92,9 @@ func PublishPrivate(ctx context.Context, directory *Directory, name string, data
 	}
 	visible, linkErr := linkPublishedEntry(ctx, directory, stage, name, identity)
 	result.Visible = visible
+	if linkErr == nil {
+		linkErr = afterPrivateLink()
+	}
 	if linkErr != nil {
 		return result, wrapAccess("publish private file", linkErr)
 	}
@@ -99,7 +106,7 @@ func PublishPrivate(ctx context.Context, directory *Directory, name string, data
 	}
 	stageRemovalAttempted = true
 	if err := removeStagedEntry(ctx, directory, stage, identity); err != nil {
-		return result, wrapAccess("retire private stage", err)
+		return result, unreadableCause("private publication cleanup is uncertain")
 	}
 	stagePresent = false
 	if err := syncPublishedDir(ctx, directory); err != nil {

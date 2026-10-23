@@ -216,15 +216,9 @@ func TestPublishPrivateFaultBoundaries(t *testing.T) {
 
 	t.Run("link-error-after-visibility", func(t *testing.T) {
 		path, directory := privateTestDirectory(t)
-		oldLink := linkPublishedEntry
-		linkPublishedEntry = func(ctx context.Context, directory *Directory, stage, name, identity string) (bool, error) {
-			visible, err := oldLink(ctx, directory, stage, name, identity)
-			if err != nil {
-				return visible, err
-			}
-			return true, injected
-		}
-		t.Cleanup(func() { linkPublishedEntry = oldLink })
+		oldAfter := afterPrivateLink
+		afterPrivateLink = func() error { return injected }
+		t.Cleanup(func() { afterPrivateLink = oldAfter })
 		result, err := PublishPrivate(t.Context(), directory, "result", []byte("complete"))
 		if err == nil || !result.Visible {
 			t.Fatalf("post-effect link error = %+v, %v", result, err)
@@ -232,6 +226,32 @@ func TestPublishPrivateFaultBoundaries(t *testing.T) {
 		data, readErr := os.ReadFile(filepath.Join(path, "result"))
 		if readErr != nil || string(data) != "complete" {
 			t.Fatalf("post-effect link output = %q, %v", data, readErr)
+		}
+	})
+
+	t.Run("cancellation-with-cleanup-failure", func(t *testing.T) {
+		path, directory := privateTestDirectory(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		oldWrite := writePrivateBytes
+		oldRemove := removeStagedEntry
+		writePrivateBytes = func(*PrivateFile, []byte) error {
+			cancel()
+			return context.Canceled
+		}
+		removeStagedEntry = func(context.Context, *Directory, string, string) error { return injected }
+		t.Cleanup(func() {
+			writePrivateBytes = oldWrite
+			removeStagedEntry = oldRemove
+			entries, _ := os.ReadDir(path)
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), ".kmx-stage-") {
+					_ = os.Remove(filepath.Join(path, entry.Name()))
+				}
+			}
+		})
+		result, err := PublishPrivate(ctx, directory, "result", []byte("complete"))
+		if result.Visible || !errors.Is(err, ErrUnreadable) || errors.Is(err, context.Canceled) {
+			t.Fatalf("cancellation plus cleanup failure = %+v, %v", result, err)
 		}
 	})
 

@@ -26,17 +26,22 @@ func SyncDirectory(ctx context.Context, directory *Directory) error {
 		if err != nil {
 			return err
 		}
-		defer windows.CloseHandle(reopened)
-		if err := checkSyncDirectory(ctx, source, reopened); err != nil {
-			return err
+		operationErr := checkSyncDirectory(ctx, source, reopened)
+		if operationErr == nil {
+			operationErr = checkContext(ctx)
 		}
-		if err := checkContext(ctx); err != nil {
-			return err
+		if operationErr == nil {
+			if err := flushDirectoryHandle(reopened); err != nil {
+				operationErr = unreadableError(err)
+			}
 		}
-		if err := flushDirectoryHandle(reopened); err != nil {
-			return unreadableError(err)
+		if operationErr == nil {
+			operationErr = checkContext(ctx)
 		}
-		return checkContext(ctx)
+		if closeErr := windows.CloseHandle(reopened); closeErr != nil {
+			return unreadableCause("sync directory handle close is uncertain")
+		}
+		return operationErr
 	})
 	return wrapAccess("sync private directory", err)
 }

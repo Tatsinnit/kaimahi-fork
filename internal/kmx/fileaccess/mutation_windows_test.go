@@ -3,6 +3,7 @@
 package fileaccess
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -179,5 +180,28 @@ func TestWindowsSyncDirectoryExecutesFlushAndRefusesReadOnlyDACL(t *testing.T) {
 	}
 	if after := securitySnapshot(t, path); after != before {
 		t.Fatalf("sync refusal repaired ACL: %s -> %s", before, after)
+	}
+}
+
+func TestWindowsLinkErrorAfterEffectReconcilesWithoutCallerContext(t *testing.T) {
+	path, directory := privateTestDirectory(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	oldSet := setPrivateLinkInformation
+	setPrivateLinkInformation = func(handle windows.Handle, status *windows.IO_STATUS_BLOCK, info *byte, size uint32) error {
+		err := oldSet(handle, status, info, size)
+		if err == nil {
+			cancel()
+			return windows.ERROR_GEN_FAILURE
+		}
+		return err
+	}
+	t.Cleanup(func() { setPrivateLinkInformation = oldSet })
+	result, err := PublishPrivate(ctx, directory, "result", []byte("complete"))
+	if err == nil || !result.Visible || errors.Is(err, context.Canceled) {
+		t.Fatalf("post-effect native link error = %+v, %v", result, err)
+	}
+	data, readErr := os.ReadFile(filepath.Join(path, "result"))
+	if readErr != nil || string(data) != "complete" {
+		t.Fatalf("reconciled visible output = %q, %v", data, readErr)
 	}
 }

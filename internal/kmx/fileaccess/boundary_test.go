@@ -37,7 +37,6 @@ func TestProductionSurfaceIsNarrowAndOpaque(t *testing.T) {
 		"DELETE":             {"create_windows.go": true},
 		"FILE_CREATE":        {"create_windows.go": true},
 		"FILE_GENERIC_WRITE": {"create_windows.go": true, "syncdir_windows.go": true},
-		"FILE_OPEN_IF":       {"create_windows.go": true},
 	}
 	files, err := filepath.Glob("*.go")
 	if err != nil {
@@ -79,7 +78,7 @@ func TestProductionSurfaceIsNarrowAndOpaque(t *testing.T) {
 			case *ast.Ident:
 				if allowed, ok := windowsAuthority[value.Name]; ok && !allowed[name] {
 					t.Errorf("%s contains Windows mutation authority %s outside its exact owner", name, value.Name)
-				} else if strings.HasPrefix(value.Name, "FILE_OVERWRITE") || value.Name == "GENERIC_WRITE" {
+				} else if value.Name == "FILE_OPEN_IF" || value.Name == "FILE_SUPERSEDE" || strings.HasPrefix(value.Name, "FILE_OVERWRITE") || value.Name == "GENERIC_WRITE" {
 					t.Errorf("%s contains unapproved Windows replacement authority %s", name, value.Name)
 				}
 			}
