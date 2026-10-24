@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -82,6 +83,11 @@ func newMCPCommand(state *commandState) *cobra.Command {
 				return err
 			}
 			kmxmcp.AddAgentResource(server, files)
+			if route == nil && root == "" || route != nil && route.Provider == "copilot" {
+				kmxmcp.AddModelResource(server, func(ctx context.Context) ([]modelaccess.Route, error) {
+					return state.copilot().List(ctx)
+				})
+			}
 			kmxmcp.AddAgentVersionResource(server, files)
 			if squad != nil {
 				kmxmcp.AddSquadResource(server, squad)
@@ -97,7 +103,7 @@ func newMCPCommand(state *commandState) *cobra.Command {
 			return nil
 		}}
 	cmd.Flags().StringVar(&root, "root", "", "optional absolute existing operation root for legacy clients; otherwise agent paths resolve against cwd")
-	cmd.Flags().StringVar(&provider, "provider", "", "trusted startup model provider, including copilot (not selectable through tools)")
+	cmd.Flags().StringVar(&provider, "provider", "", "trusted startup model provider; unbound non-fake agents default to copilot (not selectable through tools)")
 	cmd.Flags().StringVar(&endpoint, "endpoint", "", "trusted startup model endpoint (fixed for Copilot; never read from charter text)")
 	cmd.Flags().StringVar(&squadProgram, "squad-program", "", "trusted absolute qualified standalone Squad launcher; enables native targets, never installs")
 	cmd.Flags().StringVar(&squadRelease, "squad-release", "", "explicit qualified native Squad release (1.1.0); requires --squad-program")

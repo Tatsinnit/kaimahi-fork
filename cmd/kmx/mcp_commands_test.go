@@ -110,6 +110,8 @@ func TestMCPCommandUnboundStartup(t *testing.T) {
 	var ignored, diag bytes.Buffer
 	deps, loads := testDependencies(&ignored, &diag)
 	runner := &cliPreviewFake{verdict: runtime.EvaluationPass}
+	catalog, catalogs := &cliCopilot{}, 0
+	deps.newCopilot = func() copilotAccess { catalogs++; return catalog }
 	deps.stdin, deps.stdout, deps.fileRunner = sr, sw, runner
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -146,8 +148,25 @@ func TestMCPCommandUnboundStartup(t *testing.T) {
 			t.Fatal("unbound create did not save the requested file", err)
 		}
 	}
-	if runner.calls != 0 || *loads != 0 || diag.Len() != 0 {
-		t.Fatalf("authoring effects: calls=%d, loads=%d, diag=%s", runner.calls, *loads, diag.String())
+	if runner.calls != 0 || *loads != 0 || diag.Len() != 0 || catalogs != 0 {
+		t.Fatalf("authoring effects: calls=%d, loads=%d, diag=%s, catalogs=%d", runner.calls, *loads, diag.String(), catalogs)
+	}
+	models, err := cs.ReadResource(ctx, &sdk.ReadResourceParams{URI: "kmx://models"})
+	if err != nil || len(models.Contents) != 1 || !strings.Contains(models.Contents[0].Text, `"gpt-test"`) || catalogs != 1 || catalog.list != 1 {
+		t.Fatalf("runtime model resource: %+v / %v", models, err)
+	}
+	path := filepath.Join(t.TempDir(), "claude.agent.md")
+	claude := bytes.ReplaceAll(source, []byte("**Preferred:** fake"), []byte("**Preferred:** claude-haiku-5.5"))
+	created, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "create", Arguments: map[string]any{"schemaVersion": 1, "path": path, "content": string(claude)}})
+	if err != nil || created.IsError {
+		t.Fatalf("create Claude agent: %+v, %v", created, err)
+	}
+	for _, operation := range []string{"run", "test"} {
+		result, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: operation, Arguments: map[string]any{"schemaVersion": 1, "path": path}})
+		want := modelaccess.Route{Provider: "copilot", Model: "claude-haiku-5.5", Endpoint: modelaccess.CopilotEndpoint, Auth: "copilot"}
+		if err != nil || result.IsError || runner.request.Route != want || *loads != 0 {
+			t.Fatalf("default MCP route=%+v err=%v config=%d", runner.request.Route, err, *loads)
+		}
 	}
 	cancel()
 	if err := <-done; err != nil {

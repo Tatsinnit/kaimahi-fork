@@ -45,14 +45,15 @@ existing `gh auth token --hostname github.com` credential through private bounde
 stdout capture. If the OS keychain is unavailable, login prints runtime options
 instead of starting device sign-in or failing. No editor credentials are read.
 
-`kmx model list --provider copilot [-o table|json]` lists enabled Chat-compatible
+`kmx model list --provider copilot [-o table|json]` lists enabled Chat/Responses
 models as non-secret routes at `https://api.githubcopilot.com`; it never starts
 sign-in and fails clearly without auth. Local discovery remains the default.
 `kmx model logout` deletes only kmx's reusable credential and clears its memory;
 gh/editor sign-in and caller environment are unchanged. Runtime authentication
-prefers explicit `COPILOT_GITHUB_TOKEN`, otherwise kmx's native keychain item.
-Only if the keychain is unavailable does it read an existing github.com gh login
-through bounded private `gh auth token` capture. These runtime sources are never
+prefers explicit `COPILOT_GITHUB_TOKEN`, then an existing github.com gh sign-in
+through bounded private `gh auth token` capture. A working gh sign-in does not
+require kmx login or keychain setup; the owned keychain remains a fallback when
+gh is unavailable. These runtime sources are never
 saved by kmx; an invalid explicit token or service refusal does not switch
 credentials. Remove the variable or end the gh session separately to disable
 external credentials. There is no plaintext token-file fallback. macOS release builds work without CGO; explicit access uses
@@ -184,21 +185,24 @@ foreign/unmerged results and transport/schema failures refuse, without retries.
 Copilot agent or judge plus tools remains unsupported. The opt-in hosted smoke
 uses a scripted model; it is not real-LLM qualification.
 
-File mode uses embedded Sessions for fake/local routes, with one fresh Session
-per ad-hoc input/example and one private SQLite journal for the invocation.
+File mode uses embedded Sessions for fake/local and explicit Copilot routes,
+with one fresh Session per ad-hoc input, example and judge sample, and one private
+SQLite journal for the invocation.
 Optional ad-hoc input runs first, followed by only the selected examples in order.
 Each turn has a two-minute deadline, including judging, within the five-minute
 overall budget. Execution errors stop later sends. Journal close failure prevents
 a full pass. [Journal content, retention and clearing](local-preview.md#journal-retention-and-clearing)
 are disclosed separately: instructions, inputs and answers are retained in cleartext.
 
-**Tool-free Copilot exception:** when either the agent or judge uses Copilot, the whole
-invocation keeps the direct **preview runner (no journal)** and reports `NoJournal`
-at the runner boundary. It creates no Sessions journal. Fully journaled Copilot
-is follow-up work: its credential-owning transport does not yet provide the
-pre-journal content check. No tokens are exposed to the runner. Declared tools
-with a Copilot agent or judge refuse; Copilot tool support depends on
-[#662](https://github.com/kaimahi-agents/kaimahi/issues/662).
+**Tool-free Copilot is journaled**, for both Chat Completions and Responses:
+the provider checks content against its source
+token and exchanged bearer before any Session starts, without exposing either
+to the runner or harness. Its invocation-local credentials are pinned before
+journaling; there is no mid-run refresh or inference retry. Expiry, logout through
+that provider or authentication refusal stops later sends. Start a new preview
+for fresh credentials. Logout in another kmx process does not interrupt an
+existing preview: cancel it explicitly, or let its five-minute bound finish.
+Declared tools with a Copilot agent or judge still refuse.
 There are no retries, redirects or provider/model fallback. A nil dependency
 still refuses `runner_unavailable`. Hermetic tests do not qualify real local
 models or native Windows.
@@ -216,15 +220,16 @@ Agent completions require an exact model-ID echo, with no automatic aliasing.
 Explicit `--provider copilot` uses the existing authenticated model-access
 transport at the fixed `https://api.githubcopilot.com` endpoint. Other remote
 endpoints still refuse. Copilot requires prior explicit sign-in and an exact
-enabled Chat model from `kmx model list --provider copilot`; it never falls back
+enabled Chat/Responses model from `kmx model list --provider copilot`; it never falls back
 to another model or starts login during execution.
 
-Journaled fake/local judging uses the shared native two-sample evaluator: both
+File judging uses the shared native two-sample evaluator, including Copilot: both
 scores must agree on the threshold side. Split, unavailable, malformed, refused
 or mismatched-model replies are unknown. This makes two judge calls per authored
-`llmJudge` assertion, within the same deadlines. The Copilot direct exception
-retains one judge call and applies the authored threshold to one valid score.
-Neither path produces native evaluation evidence.
+`llmJudge` assertion, within the same deadlines. Each sample is a separate
+journaled Session; the journal retains its policy, payload and response in
+cleartext, including reasoning. Neither previews nor replay produce native
+evaluation evidence.
 
 ```text
 kmx run ./greeter.agent.md --prompt Ada
@@ -233,19 +238,14 @@ kmx test ./greeter.agent.md
 ```
 
 Add `--verbose` to file Run or Test for content-free diagnostics on stderr.
-Journaled fake/local execution reports completion and judge start/end. The direct
-Copilot exception also reports selected endpoints, received HTTP status,
-per-request timings and total elapsed time. Revision, model, runner label,
-assertion verdicts and final outcome remain in the normal report, not repeated
-in verbose diagnostics.
+Journaled fake/local and Copilot execution reports completion and judge
+start/end. Revision, model, runner label, assertion verdicts and final outcome
+remain in the normal report, not repeated in verbose diagnostics.
 Local endpoint origins and standard `/v1` paths are shown; custom paths are
-withheld. The direct exception distinguishes connection refusal, response timeout,
-HTTP errors and malformed or mismatched completions with safe diagnostic
-categories, never raw provider errors. Journaled execution uses fixed-text
-refusals without HTTP-status or network-subclass diagnostics; neither path
-invents a status for requests without a response.
-Both paths refuse absent, null, empty or different returned model identities.
-The direct exception distinguishes a different nonempty model as a model mismatch.
+withheld. Journaled execution uses fixed-text refusals without per-request
+HTTP-status/timing or network-subclass diagnostics; it never forwards raw
+provider errors or invents a status for requests without a response.
+Absent, null, empty or different returned model identities refuse.
 Verbose is off by default and does not imply `--show-content`: instructions,
 inputs, answers, assertion operands, judge rationale and response bodies stay
 private. JSON stdout and exit contracts are unchanged. A failed diagnostic
@@ -258,11 +258,11 @@ kmx run ./greeter.agent.md --provider ollama --endpoint http://127.0.0.1:11434/v
 For this Ollama example, first set `Model.Preferred` in your own copy of the
 charter to an exact installed Ollama model, rather than the sample's `fake`.
 
-To use Copilot, sign in explicitly, list available models, then set the file's
-`Model.Preferred` to an exact listed model ID:
+To use Copilot with an existing gh sign-in, list available models and set the
+file's `Model.Preferred` to an exact listed model ID. `kmx model login` is optional
+for users without gh:
 
 ```bash
-kmx model login
 kmx model list --provider copilot
 kmx run ./greeter.agent.md --provider copilot --prompt Ada --show-content
 kmx test ./greeter.agent.md --provider copilot
@@ -282,7 +282,8 @@ if the file contains only that example. Unknown/blank IDs refuse before inferenc
 An explicit `examples: []` can be saved and loaded while authoring. Ad-hoc Run
 with an input still works; Test refuses with “No tests yet — add or suggest one”.
 Missing/empty examples cannot pass, export a run profile or supply the evidence
-required for packaging/deployment. The exact model comes from `Model.Preferred`;
+required for packaging/deployment. The exact CLI model comes from `Model.Preferred`
+or `gpt-5.6-terra` when the Model section is omitted;
 `fake` selects only the built-in fake route. A real model additionally requires
 an explicit trusted `--provider` and, for local routes, `--endpoint`, validated by model access;
 there is no discovery, installation, sign-in or fallback inside Run/Test. The
@@ -294,11 +295,9 @@ Output defaults to text; `-o json` returns one versioned `schemaVersion: 1`,
 `kind: kmx.agent-file-preview` document. Both preserve operation, exact source-byte
 SHA-256 revision, provider/model, full/subset selection, terminal state and
 example/assertion IDs with pass/fail/unknown and safe reasons. JSON includes
-`fullPass`, which is false for every subset, incomplete or unknown result. The Copilot direct
-exception additionally includes `runner: "preview runner (no journal)"`; its
-underlying journal handle is empty and no journal is retained. Fake/local
-execution retains a private journal handle internally, never in this safe result.
-Neither a journaled local pass nor the direct exception is deploy evidence. Paths
+`fullPass`, which is false for every subset, incomplete or unknown result.
+Fake/local and Copilot execution retain a private journal handle internally,
+never in this safe result. A journaled preview pass is not deploy evidence. Paths
 are sanitized display basenames, not a file-targeting API. The optional structured
 `diagnostic` names safe parser fields, source line/column and repair advice.
 Default output contains no instructions, inputs, answers, operands, provider error
@@ -363,8 +362,8 @@ frames are bounded to 2 MiB and source files to 256 KiB.
 |---|---|---|
 | `create` | `path`, `content` | Saved path and exact-byte revision |
 | `edit` | `path`, `content`, `expectedRevision` | Saved path and new revision |
-| `run` | `path`; optional `input`, `caseId`, `showContent`, `showFailedContent` | Shared `kmx.agent-file-preview` v1 result |
-| `test` | `path`; optional `caseId`, `showContent`, `showFailedContent` | Same shared result, no ad-hoc input |
+| `run` | `path`; optional `model`, `input`, `caseId`, `showContent`, `showFailedContent` | Shared `kmx.agent-file-preview` v1 result |
+| `test` | `path`; optional `model`, `caseId`, `showContent`, `showFailedContent` | Same shared result, no ad-hoc input |
 
 #### Optional native Squad chat flow
 
@@ -464,8 +463,8 @@ starting; it does not undo work already performed by a provider. The server keep
 only fully finished tests, including their pass or failure results. The
 interrupted test and later tests are `not_run`, with unknown assertions and no
 answer excerpt, even if the interrupted test had an answer or some passing
-checks before its judge was cancelled. Both local Sessions and direct Copilot
-previews follow this cancellation rule. A finished optional Run ad-hoc answer
+checks before its judge was cancelled. Both local and Copilot previews on
+embedded Sessions follow this cancellation rule. A finished optional Run ad-hoc answer
 also remains available under the existing content opt-in. The overall result is
 `state: cancelled`, `reasonCode: cancelled`, `fullPass: false`; CLI cancellation
 remains exit 130. Deadline and non-cancellation error behavior is unchanged.
@@ -515,7 +514,7 @@ editability. A restart has no current result;
 a revision change marks the old observation stale and withholds its details.
 Reads perform no inference, mutation or journal retrieval.
 
-The [Copilot plugin](../plugins/copilot/README.md#read-only-agent-view) adds a
+The [WSL Copilot plugin](../plugins/copilot-wsl/README.md) adds a
 native authoring canvas and read-only `/agent-view PATH` text fallback over this
 resource. Canvas Edit/Test/Run use existing same-session MCP tools; only explicit
 Suggest more starts chat. Saves require the original revision; changed result
@@ -523,17 +522,32 @@ revisions are labelled stale rather than silently rebasing the draft.
 Inspection can show a minimal titled agent as well as a canonical Squad charter;
 this display-only support does not change Run/Test parser acceptance.
 
-A real model route must be selected at process startup with trusted
-`--provider` and, for local routes, `--endpoint`; the exact model still comes from
-the parsed file. For Copilot, use `kmx mcp --provider copilot`
-after explicit sign-in. The same fixed endpoint and hosted-content disclosure
-apply; startup itself performs no sign-in, credential access or model request.
-Tools accept no endpoint, credential or arbitrary-command fields. With no route,
-only exact `fake` is selectable. Run/Test use the same
+The canvas Model picker is session-only: override → authored Model.Preferred →
+`gpt-5.6-terra`. Selecting a model never edits the file or its saved-source history.
+Changing the effective model makes old results stale; another run must confirm the
+selected model, including after an A → B → A switch. Missing Model is valid for
+canonical authoring; a present blank/invalid Model remains invalid. Run/Test v1
+accept the same optional exact `model` override, not a provider or endpoint.
+An unknown catalog model fails in one line listing the available choices.
+
+Unbound/default-Copilot servers expose read-only `kmx://models` with
+`schemaVersion: 1`, `kind: "kmx.models"`, `defaultModel` and `models` (exact IDs).
+Discovery is lazy, adds no tool and starts neither sign-in nor inference. The
+picker loads it on focus; discovery failure leaves editing and fake/offline
+execution available. Explicit non-Copilot and legacy bound routes stay unchanged.
+
+Unbound `kmx mcp` uses Copilot for the effective non-fake model when no startup
+route is selected. Effective `fake` remains offline. Explicit trusted `--provider`
+and, for local routes, `--endpoint` override that provider default, not the runtime
+model choice. Legacy `--root` mode retains its existing fake-only behavior
+without an explicit route. Copilot uses the fixed endpoint and existing runtime
+credentials, without an installation-time model or login step. Hosted-content
+disclosure still applies; startup itself performs no sign-in, credential access
+or model request. Tools accept no endpoint, credential or arbitrary-command fields.
+Run/Test use the same
 [file preview runner](#agent-file-local-preview-unreleased-integration) as the
-CLI: fake/local routes use embedded Sessions and one private journal; an agent
-or judge using Copilot keeps direct execution with `NoJournal` and the explicit
-no-journal runner label. A nil runner still returns `runner_unavailable`, never
+CLI: fake/local and explicit Copilot routes use embedded Sessions and one private
+journal, with one Session per agent turn and per judge sample. A nil runner still returns `runner_unavailable`, never
 a fallback. Hermetic checks do not qualify real models or native Windows.
 There is no fifth Explain/model/install tool; offline Explain stays a CLI action.
 

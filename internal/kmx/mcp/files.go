@@ -1,5 +1,7 @@
 // Package mcp adapts local agent-file operations to stdio MCP.
 // File access is agent-only, optionally root-bound; execution uses shared App snapshots.
+// Unbound non-fake previews default to Copilot's fixed endpoint and the authored
+// model; explicit routes, fake previews and legacy root-bound behavior are unchanged.
 // Tool requests must not choose model endpoints or substitute a runner.
 // The canonical resource includes an exact, revision-bound authoring snapshot.
 // Optional failure-only excerpts exclude passing and unknown answers from safe
@@ -12,6 +14,8 @@
 // Canonical Edit optionally retains bounded private source preimages. Retention
 // failure never blocks a valid save and is explicit in its successful result.
 // Source-only versions are read-only resources; restore uses the same Edit CAS.
+// Linux creation uses no-replace rename, then hard-link publication when needed.
+// Mounts lacking both use exclusive creation and synced copy without atomic visibility.
 package mcp
 
 import (
@@ -55,7 +59,7 @@ func (e *Error) Error() string {
 	case "io_failed":
 		return "io_failed: could not read or stage the selected source; check access and available space"
 	case "publication_failed":
-		return "publication_failed: same-directory atomic rename failed; target was not published"
+		return "publication_failed: file publication failed"
 	case "cancelled":
 		return "cancelled: operation stopped before publication"
 	case "deadline_exceeded":

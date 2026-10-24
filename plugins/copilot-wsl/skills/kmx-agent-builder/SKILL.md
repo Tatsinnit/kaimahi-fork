@@ -5,8 +5,10 @@ description: Create an agent through kmx and open its canvas. Edit, run and test
 
 # Build an agent through chat
 
-Use kmx's discovered `create`, `edit`, `run` and `test` MCP tools, not shell or
-host file-write tools, for agent files. Follow their advertised schemas.
+Use the MCP server `kmx-agent-builder` advertised by this plugin for `create`,
+`edit`, `run` and `test`, not shell or host file-write tools. Follow its discovered
+schemas. Use that same server throughout: the canvas reads its resources and
+results. An unrelated demo server's name does not identify this plugin's WSL route.
 Use the repository path from the request or session. Prefer a full WSL path when
 kmx runs in WSL; agent files can live in any directory. Do not ask for a folder
 confirmation or read the plugin's installation folder as the target repository.
@@ -18,10 +20,11 @@ Do not put credentials in agent files, logs or command arguments.
 
 ## Create, then open
 
-1. Turn the requested task into an agent with a concrete Model.Preferred and
-   inline Examples. For a canonical charter include Identity ID/Purpose,
-   Accountable Responsibilities, Non-Responsibilities, Collaboration and Review
-   Authority, Model and Examples. An `.agent.md` is a normal file, not a deployed
+1. Turn the requested task into an agent with inline Examples. For a canonical
+   charter include Identity ID/Purpose, Accountable Responsibilities,
+   Non-Responsibilities, Collaboration and Review Authority, and Examples.
+   Include Model.Preferred when the user names a model; otherwise omit Model
+   and let the runtime default apply, without asking for a model. An `.agent.md` is a normal file, not a deployed
    agent or a registered Squad member.
 2. Call `create` with `schemaVersion: 1`, the full `path` and the proposed `content`.
 3. After successful Create, take `structuredContent.file.path` exactly and open
@@ -34,9 +37,12 @@ Do not put credentials in agent files, logs or command arguments.
    and runs all tests from the main view, or the selected test from its detail view.
    No automatic Run/Test is needed just to create and open an agent.
 
-Use the user's named model for a real task. The deterministic `fake` example
-below is only for orientation. Real execution needs an available configured model
-route; report a provider error as an error, not as a passing result.
+Use the user's named model for a real task. The canvas picker overrides the
+file model for that session; without either choice the default is `gpt-5.6-terra`.
+Do not rewrite the authored model for a runtime choice. The deterministic `fake`
+example below is only for orientation. An unbound server uses Copilot for the
+effective real model by default; no provider setup is needed. Explicit startup routes still
+take precedence. Report a provider error as an error, not as a passing result.
 Before the first hosted-model run, say once: "Testing sends the agent prompt and
 test inputs to the selected hosted model." This is a notice, not a confirmation.
 

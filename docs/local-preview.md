@@ -5,19 +5,28 @@ by default,
 in the kmx process. Every result is labeled **local preview**. It is not
 deployment qualification, suite evidence, a passing receipt, or authority to
 publish or deploy. `kmx run FILE`, `kmx test FILE` and MCP Run/Test use it for
-fake/local routes through the `agentpreview.Runner` interface.
+fake/local and explicit Copilot routes through the `agentpreview.Runner` interface.
 Selected examples and optional ad-hoc input share one invocation-owned journal;
-each gets a fresh Session. The adapter aborts later sends on execution or deadline
+each gets a fresh Session, as does each of the two samples per judge assertion. The adapter aborts later sends on execution or deadline
 failure, and only exposes a private journal handle after successful finalization.
 
-**Tool-free Copilot remains direct and unjournaled.** If either the agent or judge uses
-Copilot, the whole invocation uses the existing
-[preview runner (no journal)](kmx.md#agent-file-local-preview-unreleased-integration)
-and reports `NoJournal`. This preserves Copilot's credential-owning transport:
-it does not yet offer the content preflight needed before Sessions retains a
-turn. A declared tool with either a Copilot agent or a Copilot judge refuses
-before authentication or journal creation. Copilot tool support depends on
-[#662](https://github.com/kaimahi-agents/kaimahi/issues/662), not this slice.
+**Tool-free Copilot is journaled too.** Its transport performs credential checks
+before any Session starts; token values never leave the provider. Copilot agent
+and judge routes share one invocation-local credential snapshot, established
+before the journal opens. There is no mid-run credential refresh, inference retry
+or fallback. Expiry, logout through that provider, authentication refusal or
+cancellation stops later samples and examples; start a new preview to establish
+fresh credentials. Logging out in another kmx process does not revoke this
+in-memory snapshot or stop a running preview; cancel that preview explicitly.
+It ends within the five-minute invocation bound. Ordinary model listing and
+non-preview access keep their existing refresh behavior. Declared tools with either a Copilot agent or a
+Copilot judge still refuse before authentication or journal creation.
+Enabled Copilot models may use Chat Completions or Responses; the provider
+captures the catalog-selected protocol with the credential snapshot. The same
+path is retained while the catalog still advertises it; disappearance aborts,
+never switches protocols. Responses requests remain nonstreaming with
+`store:false`. The provider checks the raw envelope (including discarded fields)
+and translated completion, so joined output fragments cannot bypass the check.
 
 Status: the hermetic tests (fake model, an in-process HTTP endpoint and the
 judge) run with the root Go tests. Native Windows amd64 package tests exercise
@@ -144,8 +153,10 @@ same retention and clear operations below. Native Squad parsing stays tool-free.
 
 ## Model routes
 
-`Model.Preferred` selects the model exactly. The route comes from outside the
-agent file:
+Preview chooses the exact runtime picker/tool override, then authored
+`Model.Preferred`, then `gpt-5.6-terra`. An omitted Model remains omitted in the
+source and revision; both runners receive a per-invocation execution copy. The
+route still comes from outside the agent file:
 
 | Preferred | Route | Network |
 |---|---|---|
@@ -180,8 +191,16 @@ or different model identities refuse rather than being attributed to the request
 CLI/MCP routes retain the existing model-access policy: fake, or an explicit
 keyless local compatible/Ollama/Foundry endpoint. Validated `localhost` and
 loopback addresses and the selected base path are preserved; the adapter does
-not discover runtimes or silently rewrite the route. Copilot uses the direct
-exception described above.
+not discover runtimes or silently rewrite the route. Explicit Copilot selection
+uses its fixed endpoint and provider-owned preflight described above. Before
+journaling, it checks identities, instructions, inputs, assertion operands and
+judge metadata against both the source credential and exchanged bearer. Checked
+responses include decoded JSON strings and the exact terminal-sanitized and
+control-compacted display views, so JSON escaping or display normalization
+cannot assemble an unchecked exact credential. This is not detection of every encoded, partial or unrelated secret.
+Unbound MCP selects Copilot for the effective non-fake model when no startup
+provider is configured; selecting `fake` remains offline. Runtime model choice
+does not change a trusted startup provider, endpoint or credential source.
 
 ## Refusals
 
@@ -228,10 +247,12 @@ the fake model, the fake judge answers in memory. It scores 100 when every
 backtick-quoted phrase in the rubric appears in the answer and 0 when one is
 missing. A rubric with no quoted phrase gets `unknown`. A different judge
 endpoint must be set explicitly (`JudgeEndpoint`). Judge reasoning is
-discarded. For CLI/MCP fake/local execution this replaces the direct runner's
-single sample with two samples per judge assertion, within unchanged deadlines.
-The Copilot direct exception retains its single-sample policy, including when
-only the judge uses Copilot; it creates no journal.
+not displayed by default. CLI/MCP execution uses two samples per judge assertion,
+including Copilot, within unchanged deadlines. Each sample has a fresh tool-free
+Session in the same journal as the agent turn, even with a different judge model.
+The journal retains the judge policy, input/answer/rubric payload and response
+(including reasoning) in cleartext. Malformed or unavailable replies abort later
+sends; a valid split verdict stays unknown.
 
 ## Journal retention and clearing
 
@@ -253,8 +274,8 @@ only the judge uses Copilot; it creates no journal.
   current-user-only DACLs on Windows). Existing broader objects are refused,
   never repaired.
 - **Retention:** the journal stores the instructions, each input, the
-  model identity, each answer and the terminal or error records **in
-  cleartext**. It never stores credentials. kmx keeps the newest 20 runs and
+  model identity, each answer, judge sample payloads and responses, and the
+  terminal or error records **in cleartext**. It never stores credentials. kmx keeps the newest 20 runs and
   deletes the oldest finished runs when a new run starts. A run that is still
   executing, in this or another process, is never deleted. Executing runs, and
   overlapping starts that each count the same runs, can leave more than 20
