@@ -157,6 +157,10 @@ class AppShardWorkflowTests(unittest.TestCase):
         self.assertIn("localpreview-arm64.test.exe", windows_body)
         self.assertIn("app-arm64.test.exe", windows_body)
         self.assertIn("go vet ./internal/kmx/fileaccess ./internal/kmx/config ./internal/kmx/localpreview ./internal/kmx/app", windows_body)
+        self.assertIn("$previewTests", windows_body)
+        self.assertIn("$appTests", windows_body)
+        self.assertIn("--- SKIP:", windows_body)
+        self.assertEqual(windows_body.count("did not pass"), 2)
 
     def test_final_gate_rejects_every_non_success_and_wrong_dependency_set(self):
         steps = self.jobs["hygiene"]["steps"]

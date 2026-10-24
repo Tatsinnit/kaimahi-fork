@@ -85,14 +85,26 @@ jobs:
             -run '^(TestStateDirUsesPortableOverrideAndNativeDefault|TestWindowsStateAccessUsesLocalAppDataAndSeparatesCreation|TestWindowsStateAccessRefusesUnsafeRootWithoutRepair|TestPrepareLocalPreviewJournalDirCreatesPrivateChain)$' `
             ./internal/kmx/config
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & "$env:RUNNER_TEMP\kmx-windows-tests.exe" go test -race -count=1 -timeout=600s -v `
-            -run '^(TestFakeInstructionRegressionFailsThenFixes|TestInspectReplaysWithoutModelCall|TestJournalRetentionAndClear|TestJournalLockCleanupFailureVetoesCompletion|TestClearDirectorySyncFailureReportsUncertainty|TestWindowsJournalFamilyIsPrivateAndReplayable|TestWindowsInterruptedJournalFamilyClearRecovers)$' `
-            ./internal/kmx/localpreview
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & "$env:RUNNER_TEMP\kmx-windows-tests.exe" go test -race -count=1 -timeout=600s -v `
-            -run '^(TestLocalFileRunnerJournaledAppSnapshot|TestSuiteFailureStorePublicationUncertainty|TestSuiteFailureStoreUnresolvedVisibilityKeepsDiagnosticID|TestSuiteFailureStoreOwnPairVisibleUntilWholeClear|TestSuiteFailureStoreAtomicErrors|TestWindowsSuiteFailureStoreLifecycle|TestWindowsSuiteFailureWorkspaceCaseAliasesSharePartition)$' `
-            ./internal/kmx/app
-          exit $LASTEXITCODE
+          $previewTests = @('TestFakeInstructionRegressionFailsThenFixes','TestInspectReplaysWithoutModelCall','TestJournalRetentionAndClear','TestJournalLockCleanupFailureVetoesCompletion','TestClearDirectorySyncFailureReportsUncertainty','TestWindowsJournalFamilyIsPrivateAndReplayable','TestWindowsInterruptedJournalFamilyClearRecovers')
+          $output = & "$env:RUNNER_TEMP\kmx-windows-tests.exe" go test -race -count=1 -timeout=600s -v `
+            -run ('^(' + ($previewTests -join '|') + ')$') ./internal/kmx/localpreview 2>&1
+          $status = $LASTEXITCODE
+          $output | Write-Output
+          if ($status -ne 0) { exit $status }
+          if ($output -match '--- SKIP:') { Write-Error 'a selected localpreview test skipped'; exit 1 }
+          foreach ($test in $previewTests) {
+            if (-not ($output -match ("--- PASS: " + [regex]::Escape($test) + " \("))) { Write-Error "$test did not pass"; exit 1 }
+          }
+          $appTests = @('TestLocalFileRunnerJournaledAppSnapshot','TestSuiteFailureStorePublicationUncertainty','TestSuiteFailureStoreUnresolvedVisibilityKeepsDiagnosticID','TestSuiteFailureStoreOwnPairVisibleUntilWholeClear','TestSuiteFailureStoreAtomicErrors','TestWindowsSuiteFailureStoreLifecycle','TestWindowsSuiteFailureWorkspaceCaseAliasesSharePartition')
+          $output = & "$env:RUNNER_TEMP\kmx-windows-tests.exe" go test -race -count=1 -timeout=600s -v `
+            -run ('^(' + ($appTests -join '|') + ')$') ./internal/kmx/app 2>&1
+          $status = $LASTEXITCODE
+          $output | Write-Output
+          if ($status -ne 0) { exit $status }
+          if ($output -match '--- SKIP:') { Write-Error 'a selected App test skipped'; exit 1 }
+          foreach ($test in $appTests) {
+            if (-not ($output -match ("--- PASS: " + [regex]::Escape($test) + " \("))) { Write-Error "$test did not pass"; exit 1 }
+          }
       - name: Windows amd64 package vet
         shell: pwsh
         run: go vet ./internal/kmx/fileaccess ./internal/kmx/config ./internal/kmx/localpreview ./internal/kmx/app ./scripts/ci/windows-tests
