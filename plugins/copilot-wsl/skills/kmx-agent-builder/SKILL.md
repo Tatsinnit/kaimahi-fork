@@ -9,9 +9,11 @@ Use the MCP server `kmx-agent-builder` advertised by this plugin for `create`,
 `edit`, `run` and `test`, not shell or host file-write tools. Follow its discovered
 schemas. Use that same server throughout: the canvas reads its resources and
 results. An unrelated demo server's name does not identify this plugin's WSL route.
-Use the repository path from the request or session. Prefer a full WSL path when
-kmx runs in WSL; agent files can live in any directory. Do not ask for a folder
-confirmation or read the plugin's installation folder as the target repository.
+Use the actual folder from the request or session, not the plugin's installation
+folder. Send the full agent path in that folder. When kmx runs in WSL, translate a
+Windows folder such as `C:\work\repo` to `/mnt/c/work/repo` before appending the
+agent filename. Agent files can live in any directory; do not ask for a folder
+confirmation.
 Older explicitly rooted installations also support their root-relative paths.
 
 kmx reads and writes agent files only: `*.agent.md` and Squad charters at
@@ -63,7 +65,8 @@ possible, then reply exactly: `<basename> already exists. To make a second agent
 new name, such as <stem>-2.` Do not say Created or claim it was already open.
 
 Use the user's named model for a real task. The canvas picker overrides the
-file model for that session; without either choice the default is `gpt-5.6-terra`.
+file model for that canvas. With neither choice, the canvas follows the current
+chat model when available; otherwise it uses `gpt-5.6-terra`.
 Do not rewrite the authored model for a runtime choice. The deterministic `fake`
 example below is only for orientation. An unbound server uses Copilot for the
 effective real model by default; no provider setup is needed. Explicit startup routes still
@@ -93,9 +96,11 @@ CLI with the exact file path.
 
 ## Add tests from chat
 
-When asked to add or suggest tests, read the agent's current kmx resource and
-add job-relevant tests with Edit at that revision. Preserve its prompt, authored
-model and existing tests. Use the stable-string recipe above. Do not run tests
+When asked to add or suggest tests with a saved agent snapshot, use its exact
+`content` and `expectedRevision`; no resource read is needed. Add job-relevant
+tests with one Edit at that revision. Otherwise read the current resource if the
+host provides a resource reader. Preserve the prompt, authored model and existing
+tests. Use the stable-string recipe above. Do not run tests
 unless asked. After a confirmed save, the complete reply is exactly one line:
 `Added <count> tests to <file>.` Use the basename, with no revision, test list or
 trailing explanation. The canvas reads the saved file. If no save occurred,

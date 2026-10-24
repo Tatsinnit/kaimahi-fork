@@ -7,6 +7,8 @@
 // workspace and completed non-pass file-Test failures use the checked private
 // filesystem on supported local filesystems; visible-but-unconfirmed records
 // remain diagnostics only and file records never become evaluation evidence.
+// File previews bind omitted judge models on execution copies and expose valid
+// two-sample scores and sanitized transient reasons only with content disclosure.
 package app
 
 import (

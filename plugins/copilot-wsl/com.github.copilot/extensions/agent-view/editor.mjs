@@ -1,5 +1,5 @@
 // Inert DOM editing and exact source serialization. Loaders and actions are caller-owned.
-import { DEFAULT_MODEL } from "./authoring.mjs";
+import { effectiveModel } from "./authoring.mjs";
 export const el = (doc, tag, className, text) => {
   const node = doc.createElement(tag);
   if (className) node.className = className;
@@ -47,13 +47,13 @@ export const friendlyName = (id) => {
 export const clone = (value) => JSON.parse(JSON.stringify(value));
 export const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 export const operandKey = (type) => type === "regex" ? "pattern" : type === "llmJudge" ? "rubric" : "value";
-export const EDITABLE_TYPES = [["contains", "Contains"], ["notContains", "Not contains"], ["regex", "Regex"]];
+export const EDITABLE_TYPES = [["contains", "Contains"], ["notContains", "Not contains"], ["regex", "Regex"], ["llmJudge", "Judge"]];
 export const quoted = (text) => `“${text}”`;
 const fieldValue = (a) => new Map(a.fields).get(operandKey(a.type)) ?? "";
 export const checkLabel = (a) => {
   const value = fieldValue(a);
   return a.type === "contains" ? `Contains ${quoted(value)}` : a.type === "notContains" ? `Not contains ${quoted(value)}`
-    : a.type === "regex" ? `Matches regex ${quoted(value)}` : a.type === "llmJudge" ? friendlyName(a.id) : `Condition: ${a.type}`;
+    : a.type === "regex" ? `Matches regex ${quoted(value)}` : a.type === "llmJudge" ? `${value} · judge` : `Condition: ${a.type}`;
 };
 // Repair suggestions use only the actual excerpt. A differing reference is
 // named only when the answer holds exactly one same-anchored phrase, e.g. the
@@ -78,7 +78,7 @@ export function failureFacts(c, assertion) {
   if (c.state !== "fail") return;
   for (const a of assertion ? [assertion] : c.example.assertions) {
     const got = c.expected?.get(checkKey(a)) === a ? c.checks?.get(checkKey(a)) : undefined;
-    if (got?.verdict !== "fail") continue;
+    if (got?.verdict !== "fail" || a.type === "llmJudge") continue;
     const value = fieldValue(a), excerpt = c.row?.answerExcerpt;
     const actual = a.type === "contains" ? provenActual(value, excerpt) : undefined;
     const text = a.type === "contains" ? `Missing "${value}"` : a.type === "notContains" ? `Found "${value}"`
@@ -126,7 +126,6 @@ export function countText(rows) {
     .filter((k) => counts.get(k)).map((k) => `${counts.get(k)} ${k}`).join(", ");
 }
 export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-export const modelText = (model) => model.match(/^model: (.+)$/m)?.[1] ?? model.replace(/\n/g, " · ");
 // Last-run display is controller-local, never a current resource or write input.
 export function resultHistory(initial) {
   let last;
@@ -157,11 +156,17 @@ export function resultHistory(initial) {
     },
   };
 }
-export const modelLabel = route => {
-  const id = route?.slice(route.indexOf("/") + 1) ?? "";
-  const labels = { "gpt-5.6-terra": "GPT-5.6 Terra", "claude-sonnet-5.5": "Claude Sonnet 5.5", "claude-haiku-5.5": "Claude Haiku 5.5" };
-  return Object.hasOwn(labels, id) ? labels[id] : id;
-};
+// Presentation inferred from familiar ID shapes, never catalog metadata or
+// execution aliases. Unknown IDs remain literal, including provider prefixes.
+export function modelPresentation(id) {
+  let match = /^(gpt-\d+(?:\.\d+)*)(?:-(terra|sol|mini|nano|codex))?$/.exec(id);
+  if (match) return { name: match[1].replace("gpt", "GPT") + (match[2] ? " " + friendlyName(match[2]) : ""), group: "OpenAI" };
+  match = /^claude-(sonnet|haiku|opus)-(\d+(?:\.\d+)*)$/.exec(id);
+  if (match) return { name: `Claude ${friendlyName(match[1])} ${match[2]}`, group: "Claude" };
+  match = /^gemini-(\d+(?:\.\d+)*)-(pro|flash)$/.exec(id);
+  return match ? { name: `Gemini ${match[1]} ${friendlyName(match[2])}`, group: "Gemini" } : { name: id, group: "Other models" };
+}
+export const modelLabel = route => modelPresentation(route?.slice(route.indexOf("/") + 1) ?? "").name;
 export function resultPill(doc, settings) {
   const node = el(doc, "span", "result-pill"), dot = el(doc, "span", "result-dot"), text = el(doc, "span");
   dot.setAttribute("aria-hidden", "true"); node.append(dot, text);
@@ -171,6 +176,66 @@ export function resultPill(doc, settings) {
 export function growTextarea(input) {
   input.style.height = "auto";
   input.style.height = `${input.scrollHeight + 2}px`;
+}
+// A check's fields own only their input values; source mutation and key actions stay caller-owned.
+export function checkFields(doc, initial, index, change, fieldKeys) {
+  const node = el(doc, "div", "check-fields");
+  let inputs = [], first;
+  const show = assertion => {
+    inputs = []; node.replaceChildren();
+    const judge = assertion.type === "llmJudge";
+    node.className = judge ? "check-fields judge-fields" : "check-fields";
+    const definitions = judge ? [["rubric", "Rubric"], ["minScore", "Minimum score"], ["judgeModel", "Judge model"], ["judgeVersion", "Judge version"]] : [[operandKey(assertion.type), "text"]];
+    for (const [key, label] of definitions) {
+      const input = el(doc, judge && key === "rubric" ? "textarea" : "input", `field check-value${key === "rubric" ? " judge-rubric" : ""}`);
+      input.value = assertion[key] ?? "";
+      input.setAttribute("aria-label", `Check ${index + 1} ${label.toLowerCase()}`); input.setAttribute("spellcheck", "false");
+      if (key === "minScore") { input.type = "number"; input.min = "0"; input.max = "100"; input.step = "1"; }
+      else if (input.tagName?.toLowerCase() !== "textarea" && key !== "rubric") input.type = "text";
+      if (!judge) input.setAttribute("placeholder", assertion.type === "contains" ? "Text the answer must contain" : assertion.type === "notContains" ? "Text the answer must not contain" : "Pattern the answer must match");
+      if (key === "rubric") input.rows = 2;
+      if (key === "judgeModel") input.setAttribute("placeholder", "Run model when blank");
+      input.addEventListener("input", () => change(key, key === "minScore" && input.value !== "" ? Number(input.value) : input.value));
+      fieldKeys(input); inputs.push(input);
+      if (judge) { const wrap = el(doc, "label", `check-field ${key === "rubric" ? "rubric-field" : ""}`, label); wrap.append(input); node.append(wrap); }
+      else node.append(input);
+    }
+    first = inputs[0];
+  };
+  show(initial);
+  return { node, show, focus() { first.focus(); }, update(disabled) { for (const input of inputs) { input.disabled = disabled; if (input === first && first.rows) growTextarea(first); } } };
+}
+// Unknown is an observation, not a passing/failing check. Identity must still be unambiguous.
+export function inconclusiveJudge(c, observed) {
+  return observed?.verdict === "unknown" && ["unknown", "fail"].includes(c?.state) && c.expected?.size === c.checks?.size
+    && [...c.expected.values(), ...c.checks.values()].every(value => value !== null)
+    && [...c.checks.keys()].every(key => c.expected.has(key));
+}
+// Judge diagnostics are display-only and stay out of the list's status copy.
+export function judgeDetails(doc) {
+  const binding = el(doc, "div", "meta judge-binding"), node = el(doc, "div", "judge-result");
+  const score = el(doc, "div", "judge-score"), reason = el(doc, "div", "judge-reason");
+  return { binding, node, score, reason, update(assertion, observed, visible, old) {
+    const model = assertion?.judgeModel ?? assertion?.fields?.find(([key]) => key === "judgeModel")?.[1];
+    binding.textContent = model ? `Judge model: ${model} · pinned` : "Judge model: Run model · follows selection";
+    const detail = visible ? observed?.judge : undefined;
+    score.textContent = detail ? `Scores: ${detail.scores.join(", ")} · minimum ${detail.minScore}` : "";
+    reason.textContent = visible ? detail?.reasons.length ? detail.reasons.join("\n\n") : observed?.reason ?? "" : "";
+    node.hidden = !visible; node.className = old ? "judge-result old" : "judge-result";
+  } };
+}
+export function checkComplete(a) {
+  if (!EDITABLE_TYPES.some(([type]) => type === a.type)) return true;
+  if (!String(a[operandKey(a.type)] ?? "").trim()) return false;
+  return a.type !== "llmJudge" || typeof a.minScore === "number" && Number.isInteger(a.minScore) && a.minScore >= 0 && a.minScore <= 100
+    && (a.judgeModel === undefined || a.judgeModel === "" || typeof a.judgeModel === "string" && !!a.judgeModel.trim())
+    && typeof a.judgeVersion === "string" && !!a.judgeVersion.trim();
+}
+export function convertCheck(target, type) {
+  const oldKey = operandKey(target.type), newKey = operandKey(type), value = target[oldKey] ?? "";
+  if (oldKey !== newKey) delete target[oldKey];
+  if (target.type === "llmJudge" && type !== "llmJudge") for (const key of ["minScore", "judgeModel", "judgeVersion"]) delete target[key];
+  target.type = type; target[newKey] = value;
 }
 export function checkTypeControl(doc, initial, change, cancel) {
   const node = el(doc, "div", "check-type"), trigger = el(doc, "button", "check-type-button"), menu = el(doc, "div", "check-type-menu");
@@ -186,7 +251,7 @@ export function checkTypeControl(doc, initial, change, cancel) {
     option.addEventListener("click", () => {
       show(type); open(false);
       choices.forEach((item, i) => { item.setAttribute("aria-checked", String(i === index)); });
-      change(type); trigger.focus();
+      trigger.focus(); change(type);
     });
     option.addEventListener("keydown", event => {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -209,10 +274,60 @@ export function checkTypeControl(doc, initial, change, cancel) {
 
 // Runtime selection only emits values to its owner; it cannot read or write an agent.
 export function runtimeModelControl(doc, settings, load, change) {
-  const node = el(doc, "label", "runtime-model"), select = el(doc, "select", "model-picker"), status = el(doc, "span", "quiet model-status");
-  select.setAttribute("aria-label", "Runtime model"); status.setAttribute("role", "status");
-  let models = [], state = "idle";
-  select.addEventListener("focus", async () => {
+  const node = el(doc, "div", "runtime-model"), trigger = el(doc, "button", "model-picker"), menu = el(doc, "div", "model-menu");
+  const status = el(doc, "div", "quiet model-status"); status.setAttribute("role", "status");
+  trigger.type = "button"; trigger.setAttribute("aria-haspopup", "menu");
+  menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Runtime models");
+  let models = [], state = "idle", choices = [], opened = false;
+  const open = value => { opened = value; menu.hidden = !value; trigger.setAttribute("aria-expanded", String(value)); };
+  const bind = (item, value) => {
+    item.addEventListener("click", () => { if (trigger.disabled) return; open(false); change(value); trigger.focus(); });
+    item.addEventListener("keydown", event => {
+      const index = choices.indexOf(item);
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+        event.preventDefault(); choices[event.key === "Home" ? 0 : event.key === "End" ? choices.length - 1 : (index + (event.key === "ArrowDown" ? 1 : choices.length - 1)) % choices.length].focus();
+      } else if (event.key === "Escape") { event.preventDefault(); open(false); trigger.focus(); }
+      else if (event.key === "Tab") open(false);
+    });
+    choices.push(item);
+  };
+  const update = () => {
+    const { authored, selected, chatModel, disabled } = settings();
+    const fallback = effectiveModel(authored, "", chatModel), current = selected || fallback;
+    const origin = selected ? "this canvas" : authored ? "from the agent file" : "default";
+    trigger.replaceChildren(el(doc, "span", "model-name", modelPresentation(current).name), el(doc, "span", "model-origin", ` · ${origin}`), icon(doc, "down", 12, 2));
+    trigger.setAttribute("aria-label", `Runtime model: ${modelPresentation(current).name} · ${origin}`);
+    trigger.setAttribute("title", `${current} · ${origin}`); trigger.disabled = !!disabled;
+    const focused = choices.find(option => option === doc.activeElement)?.getAttribute("data-model"), wasOpen = opened;
+    const ids = [...new Set([fallback, chatModel, selected, ...models].filter(Boolean))];
+    const groups = new Map();
+    for (const id of ids) {
+      const group = modelPresentation(id).group;
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group).push(id);
+    }
+    choices = []; menu.replaceChildren();
+    for (const [name, ids] of groups) {
+      const group = el(doc, "div", "model-options"); group.setAttribute("role", "group"); group.setAttribute("aria-label", name);
+      group.append(el(doc, "div", "model-group", name));
+      for (const id of ids) {
+        const option = el(doc, "button", "model-option", modelPresentation(id).name); option.type = "button";
+        option.setAttribute("role", "menuitemradio"); option.setAttribute("aria-checked", String(id === current));
+        option.setAttribute("data-model", id); option.setAttribute("title", id); option.disabled = !!disabled;
+        if (id === chatModel) option.append(el(doc, "span", "model-chat", "Current chat model"));
+        bind(option, id); group.append(option);
+      }
+      menu.append(group);
+    }
+    status.textContent = state === "loading" ? "Loading models…" : state === "failed" ? "Choices unavailable; model selection unchanged." : "";
+    // Following is a mode, not a duplicate entry for the fallback's model ID.
+    const follow = el(doc, "button", "model-default", authored ? "Use agent file model" : chatModel ? "Follow chat model" : "Use default model");
+    follow.type = "button"; follow.disabled = !!disabled; follow.setAttribute("role", "menuitem"); follow.setAttribute("data-model", "");
+    bind(follow, ""); menu.append(follow, status);
+    if (disabled) open(false);
+    if (focused !== undefined && !disabled) { open(wasOpen); choices.find(option => option.getAttribute("data-model") === focused)?.focus(); }
+  };
+  const discover = async () => {
     if (state === "ready" || state === "loading") return;
     state = "loading"; update();
     try {
@@ -221,18 +336,16 @@ export function runtimeModelControl(doc, settings, load, change) {
       models = response.models; state = "ready";
     } catch { state = "failed"; }
     update();
-  });
-  select.addEventListener("change", () => change(select.value));
-  node.append(el(doc, "span", "meta", "Model"), select, status);
-  const update = () => {
-    const { authored, selected, needsRun } = settings();
-    const first = el(doc, "option", "", authored ? `Agent file (${authored})` : `Default (${DEFAULT_MODEL})`); first.value = "";
-    const ids = selected && !models.includes(selected) ? [selected, ...models] : models;
-    select.replaceChildren(first, ...ids.map((id) => { const option = el(doc, "option", "", id); option.value = id; return option; }));
-    select.value = selected;
-    status.textContent = state === "loading" ? "Loading models…" : state === "failed" ? "Choices unavailable; file/default still works." : needsRun ? "Run to refresh results." : "";
   };
-  update(); return { node, select, update };
+  trigger.addEventListener("click", async () => { if (trigger.disabled) return; open(!opened); if (opened) await discover(); });
+  trigger.addEventListener("keydown", event => {
+    if (event.key === "Escape") { event.preventDefault(); open(false); }
+    else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault(); open(true); discover(); choices[event.key === "ArrowDown" ? 0 : choices.length - 1]?.focus();
+    }
+  });
+  node.addEventListener("focusout", event => { if (!node.contains(event.relatedTarget)) open(false); });
+  node.append(trigger, menu); open(false); update(); return { node, trigger, update };
 }
 
 // Static icon geometry copied from the approved board builder; never derived from resource text.
@@ -346,6 +459,7 @@ export function instructionBlocks(source) {
 }
 
 const inlineNodes = new WeakSet();
+const caretPlaceholders = new WeakSet();
 export function inlineText(doc, node, text) {
   for (const [index, line] of text.split("\n").entries()) {
     if (index) node.append("\n");
@@ -380,10 +494,10 @@ export function editorValue(root) {
     }
     const tag = node.tagName?.toLowerCase();
     if (node !== root && !["br", "div", "p"].includes(tag) && !inlineNodes.has(node)) throw new Error("Unsupported editor formatting.");
-    if (tag === "br") return "\n";
+    if (tag === "br") return caretPlaceholders.has(node) ? "" : "\n";
     const children = [...node.childNodes];
     if (["div", "p"].includes(tag) && node !== root && children.length === 1 && children[0].tagName?.toLowerCase() === "br") return "";
-    if (inlineNodes.has(node) && children.some((child) => child.nodeType !== 3)) throw new Error("Unsupported inline formatting.");
+    if (inlineNodes.has(node) && children.some((child) => child.nodeType !== 3 && !caretPlaceholders.has(child))) throw new Error("Unsupported inline formatting.");
     let value = "", previousBlock = false;
     for (const [index, child] of children.entries()) {
       const block = ["div", "p"].includes(child.tagName?.toLowerCase());
@@ -402,8 +516,39 @@ export function insertPlainText(doc, node, text) {
     range = doc.createRange(); range.selectNodeContents(node); range.collapse(false);
   }
   range.deleteContents();
+  // A collapsed root boundary belongs inside its adjacent line, not between
+  // block containers (which the serializer already separates with an LF).
+  if (range.startContainer === node && range.collapsed && node.childNodes.length) {
+    const index = range.startOffset, line = node.childNodes[index === 0 ? 0 : index - 1];
+    if (["div", "p"].includes(line.tagName?.toLowerCase())) range.setStart(line, index === 0 ? 0 : line.childNodes.length);
+  }
+  const container = range.startContainer;
+  if (["div", "p"].includes(container?.tagName?.toLowerCase()) && container.childNodes.length === 1 && container.childNodes[0].tagName?.toLowerCase() === "br") {
+    container.replaceChildren(); range.setStart(container, 0);
+  }
+  // Keep insertion before an existing terminal caret placeholder, including
+  // selections supplied at the line/root end rather than by the browser.
+  const tail = container.childNodes?.[container.childNodes.length - 1];
+  if (caretPlaceholders.has(tail) && range.startOffset === container.childNodes.length) range.setStart(container, range.startOffset - 1);
   const inserted = doc.createTextNode(text);
-  range.insertNode(inserted); range.setStartAfter(inserted); range.collapse(true);
+  range.insertNode(inserted); range.setStartAfter(inserted);
+  // Chromium collapses a terminal LF without a following rendered caret row.
+  // This owned BR supplies that row without contributing authored source text.
+  const following = [];
+  let cursor = inserted;
+  for (;;) {
+    const parent = cursor.parentNode, siblings = [...parent.childNodes];
+    following.push(...siblings.slice(siblings.indexOf(cursor) + 1));
+    if (!inlineNodes.has(parent)) break;
+    cursor = parent;
+  }
+  if (text.endsWith("\n")
+      && following.every(child => caretPlaceholders.has(child) || child.nodeType === 3 && !child.textContent)
+      && !following.some(child => caretPlaceholders.has(child))) {
+    const placeholder = el(doc, "br"); caretPlaceholders.add(placeholder);
+    range.insertNode(placeholder); range.setStartAfter(inserted);
+  }
+  range.collapse(true);
   selection?.removeAllRanges(); selection?.addRange(range);
 }
 // Each source line is its own block so a blank line can be drawn as a short

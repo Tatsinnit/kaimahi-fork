@@ -372,16 +372,11 @@ changes in the package's Go doc comment.
   native judge wiring does not enable recorded candidate execution.
   The checkout-only native qualifier runs in the full read-only reusable Orka
   worker after raw model proof, with private captures and metadata-only artifacts.
-  Trigger-matching or uncertain-diff PRs, manual qualification and daily main nightly
-  retain that proof. Releases qualify the shipped inner loop, not cluster runtimes;
-  run runtime-qualification.yml on the exact ref before a runtime-related tag.
-  Valid paths outside the Orka-owned trigger list skip it, as do routine main
-  pushes: main is re-verified nightly, not per merge.
-  Shared CLI/App/config/packaging and pkg/kmx changes rely on nightly integration
-  proof, not per-PR Orka proof; do not silently broaden the owned trigger list.
-  The generated caller manifest alone does not trigger proof. Its hygiene guard
-  and the init guard keep their old selections, not every newly skipped path;
-  other skipped effects rely on hygiene and nightly integration detection.
+  Live Orka runtime qualification runs only nightly and on demand, never on
+  pull requests or pushes. Releases qualify the shipped inner loop, not cluster
+  runtimes; run runtime-qualification.yml on the exact ref before a runtime-related
+  tag. The caller manifest hygiene guard and init guard retain their existing
+  selections and JSON policy; integration detection relies on the full nightly.
   Keep required `hygiene` and `e2e-hello-world` checks intact and fail closed on
   unintended skips/failures. No path/docs shortcuts belong inside the full worker.
   Its second exclusively owned kind cluster has one pinned Orka in
@@ -537,10 +532,12 @@ The separate native Copilot view uses the host SDK and a private loopback asset
 bridge, without mutations or direct agent-file reads.
 The repository-installable WSL plugin lives in `plugins/copilot-wsl`, including
 shared skills and canvas runtime assets. Legacy native packaging copies these
-same sources; do not maintain a second canvas/skill implementation. Keep its MCP
-command exactly `wsl.exe -e /usr/local/bin/kmx mcp`, without a bundled engine,
-root/model configuration or installation helper. Node tests stay outside the
-installable tree under `plugins/copilot`.
+same sources; do not maintain a second canvas/skill implementation. The macOS/PATH
+plugin in `plugins/copilot` links to those shared sources; its MCP command is
+`kmx mcp`. Keep the WSL MCP command exactly `wsl.exe -e /usr/local/bin/kmx mcp`,
+without a bundled engine, root/model configuration or installation helper.
+Node tests stay outside both installable trees under `plugins/tests/copilot`.
+Legacy bundle tooling retains its separate `native-mcp.json` template.
 See [MCP](docs/kmx.md#local-stdio-mcp).
 
 ## Internal native Squad authoring boundary

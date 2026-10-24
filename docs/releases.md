@@ -128,10 +128,14 @@ app session, hosted inference or cluster runtimes. Dry-run artifacts contain
 `release-assets/` and `release-notes.md` under their common root.
 For Windows Copilot, use the [plain WSL plugin](../plugins/copilot-wsl/README.md):
 install the Linux binary in WSL, then install the plugin from the repository.
+On macOS, use the [plain PATH plugin](../plugins/copilot/README.md#install-on-macos)
+with the release's darwin binary. The tap is not updated for prereleases.
+The separate macOS plugin CI checks install and the offline fake-model loop;
+it does not exercise a Copilot model or the desktop app.
 
 Orka is qualified nightly on main by `orka-nightly.yml`; kagent is qualified by
-the scheduled CI workflow. Orka-related PRs retain their existing full-proof
-routing. Before a runtime-related tag, dispatch the separate read-only
+the scheduled CI workflow. Live Orka runtime qualification never runs on pull
+requests or pushes. Before a runtime-related tag, dispatch the separate read-only
 [runtime qualification workflow](../.github/workflows/runtime-qualification.yml)
 on the intended release ref:
 

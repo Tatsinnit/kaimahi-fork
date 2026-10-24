@@ -127,8 +127,8 @@ func canonicalEvaluationJudgeURL(raw string) (string, error) {
 	return canonical, nil
 }
 
-// evaluate preserves ordinary assertion rows and fills only judge rows while the
-// attributed answer is ephemeral. Adapters invoke it only after execution succeeds.
+// evaluate preserves ordinary assertion rows and fills only judge rows.
+// Callers control answer retention. Adapters invoke it only after execution succeeds.
 func (c *evaluationJudgeClient) evaluate(ctx context.Context, evaluationCase agentruntime.EvaluationCase, evidence agentruntime.EvaluationEvidence) []agentruntime.EvaluationAssertionResult {
 	if notes := suiteFailureRunNotes(ctx); notes != nil {
 		notes.key = c.key
@@ -145,7 +145,10 @@ func (c *evaluationJudgeClient) evaluate(ctx context.Context, evaluationCase age
 		}
 		row := &rows[i]
 		note := suiteJudgeDiagnostic{CaseID: evaluationCase.ID, AssertionID: a.ID, Class: "judge-unavailable"}
-		defer func() { recordSuiteJudgeDiagnostic(ctx, note) }()
+		defer func() {
+			recordSuiteJudgeDiagnostic(ctx, note)
+			recordFileJudgeDiagnostic(ctx, note, c.key)
+		}()
 		row.Judge = &agentruntime.EvaluationJudgeEvidence{
 			Model: a.JudgeModel, ModelVersion: a.JudgeVersion, Provenance: "user-declared", RequestStyle: agentruntime.EvaluationJudgeRequestStyle,
 			EvaluatorDigest:     agentruntime.EvaluationJudgeEvaluatorDigest(),

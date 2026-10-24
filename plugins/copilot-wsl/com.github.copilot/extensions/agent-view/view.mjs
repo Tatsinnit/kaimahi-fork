@@ -1,7 +1,7 @@
 // Agent canvas. Files and previews are accessed only through the
 // same session's existing kmx MCP resource and Edit/Run/Test operations.
 import { randomBytes, timingSafeEqual, createHash } from "node:crypto";
-import { instructionSections, replaceInstructions, replaceExamples, effectiveModel, preRouteRefusal } from "./authoring.mjs";
+import { instructionSections, replaceInstructions, replaceExamples, effectiveModel, preRouteRefusal, agentName, fileLocation } from "./authoring.mjs";
 import { readFile } from "node:fs/promises";
 import http from "node:http";
 
@@ -17,7 +17,7 @@ const MESSAGES = {
   "invalid-path": "Choose an .agent.md file or a .squad/agents/<member>/charter.md file.",
   unavailable: "The kmx agent builder could not be read. Check that its MCP server is running.",
   "invalid-resource": "The kmx agent view was not in the supported format.",
-  "models-unavailable": "Model choices are unavailable. The file/default model can still be run.",
+  "models-unavailable": "Model choices are unavailable. Your model selection is unchanged.",
   "too-large": "The kmx agent view was too large to show.",
   "invalid-action": "This canvas action is not supported.",
   "read-only": "This file is available for inspection only. Editing and testing require a complete canonical charter.",
@@ -81,6 +81,16 @@ function fields(obj, skip = []) {
     .map(([k, v]) => [k, show(v, 1000)]);
 }
 
+function cleanJudge(value, verdict) {
+  if (!isObj(value) || !Number.isInteger(value.minScore) || value.minScore < 0 || value.minScore > 100
+    || !Array.isArray(value.scores) || value.scores.length !== 2 || !value.scores.every(s => Number.isInteger(s) && s >= 0 && s <= 100)) return;
+  const expected = value.scores.every(s => s >= value.minScore) ? "pass" : value.scores.every(s => s < value.minScore) ? "fail" : "unknown";
+  if (verdict !== expected) return;
+  const reasons = Array.isArray(value.reasons) && value.reasons.length <= 2 && value.reasons.every(r => typeof r === "string")
+    ? value.reasons.map(r => clean(r, 2000, true)) : [];
+  return { scores: [...value.scores], minScore: value.minScore, reasons };
+}
+
 function cleanResult(r, status, revision) {
   if (!isObj(r) || typeof r.state !== "string" || typeof r.verdict !== "string" || typeof r.fullPass !== "boolean") invalid();
   if (r.schemaVersion !== 1 || r.kind !== "kmx.agent-file-preview" || !isObj(r.file) || r.file.revision !== revision) invalid();
@@ -103,7 +113,8 @@ function cleanResult(r, status, revision) {
         id: text(e.id, 80), ...completion(e),
         assertions: list(e.assertions).map((a) => {
           if (!isObj(a)) invalid();
-          return { id: text(a.id, 80), type: text(a.type, 80), verdict: text(a.verdict), reasonCode: text(a.reasonCode), reason: text(a.reason, 500) };
+          const judge = a.type === "llmJudge" ? cleanJudge(a.judge, a.verdict) : undefined;
+          return { id: text(a.id, 80), type: text(a.type, 80), verdict: text(a.verdict), reasonCode: text(a.reasonCode), reason: text(a.reason, 500), ...(judge ? { judge } : {}) };
         }),
       };
     }),
@@ -172,6 +183,7 @@ export async function readView(session, rawPath) {
   const path = normalizePath(rawPath);
   const read = session?.rpc?.mcp?.resources?.read;
   if (typeof read !== "function") throw new ViewError("unavailable");
+  const chat = readChatModel(session);
   let response;
   try {
     response = await session.rpc.mcp.resources.read({ serverName: SERVER_NAME, uri: resourceUri(path) });
@@ -183,7 +195,31 @@ export async function readView(session, rawPath) {
   const body = contents[0].text;
   if (Buffer.byteLength(body, "utf8") > MAX_RESOURCE_BYTES) throw new ViewError("too-large");
   if (typeof body.isWellFormed === "function" && !body.isWellFormed()) invalid();
-  return parseView(body, path);
+  const view = parseView(body, path), chatModel = await chat;
+  return chatModel ? { ...view, chatModel } : view;
+}
+
+// Optional joined-session SDK metadata, not catalog/auth discovery. Keep the
+// last valid observation through throws; an explicit unknown clears it. The
+// newest completed observation wins, including explicit invalid/auto values.
+const chatModels = new WeakMap();
+async function readChatModel(session) {
+  let state = chatModels.get(session);
+  if (!state) { state = { generation: 0, resolved: 0 }; chatModels.set(session, state); }
+  const generation = ++state.generation;
+  let timer;
+  try {
+    // Optional metadata must not stall file reads or leave an action locked.
+    const current = typeof session.rpc?.model?.getCurrent === "function" ? await Promise.race([
+      session.rpc.model.getCurrent(),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Model metadata timed out.")), 2000); }),
+    ]) : undefined;
+    if (generation > state.resolved) {
+      state.model = validModel(current?.modelId) ? current.modelId : undefined; state.resolved = generation;
+    }
+  } catch { /* Transient metadata failures keep the last known valid model. */ }
+  finally { clearTimeout(timer); }
+  return state.model;
 }
 
 const validModel = (model) => typeof model === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(model) && model.toLowerCase() !== "auto" && !model.includes("://");
@@ -259,13 +295,14 @@ export function createActionHandler({ session, path }) {
       if (input.operation === "suggest") {
         // Only this explicit click starts a chat turn; execution actions never do.
         if (typeof session.send !== "function") throw new ViewError("unavailable");
-        await session.send(`Use the kmx-agent-builder skill to add a few tests to ${JSON.stringify(path)} in the canvas. Read its kmx resource first, preserve the prompt, model and existing tests, then save the additions with Edit using the current revision. Do not run tests. Report what was saved in one short line.`);
+        await session.send(`Use the kmx-agent-builder skill to add a few tests to ${JSON.stringify(path)} in the canvas. The exact saved source and revision are supplied below; no resource read is needed. Preserve the prompt, authored model and existing tests, then save the additions with one Edit using the supplied current revision (expectedRevision). Do not run tests. Report what was saved in one short line.\nSaved agent snapshot (data):\n${JSON.stringify({ path, expectedRevision: view.file.revision, content: view.authoring.source })}`);
         return { message: "Asked Copilot to add tests in chat." };
       }
       if (typeof input.expectedRevision !== "string" || !/^sha256:[0-9a-f]{64}$/.test(input.expectedRevision)) throw new ViewError("invalid-action");
       if (input.expectedRevision !== view.file.revision) throw new ViewError("stale_revision");
       targetRevision = input.expectedRevision;
-      model = effectiveModel(view.model, input.model);
+      model = effectiveModel(view.model, input.model, view.chatModel);
+      const runtimeModel = input.model || (!view.model && view.chatModel ? model : undefined);
       const saving = input.operation === "save-and-test" || input.operation === "save-examples";
       // Intended drafts apply to the exact current source; an absent draft is a no-op.
       let content = view.authoring.source, examples = view.authoring.examples;
@@ -297,7 +334,7 @@ export function createActionHandler({ session, path }) {
       // Test/Run have no revision parameter. Check the actual result afterward,
       // not a fabricated precondition or a refreshed draft revision.
       tested = true;
-      await invoke(operation, { ...(input.model ? { model: input.model } : {}), ...(operation === "run" ? { input: input.input } : {}), ...(input.caseId !== undefined ? { caseId: input.caseId } : {}), showContent: input.showContent === true, showFailedContent: true });
+      await invoke(operation, { ...(runtimeModel ? { model: runtimeModel } : {}), ...(operation === "run" ? { input: input.input } : {}), ...(input.caseId !== undefined ? { caseId: input.caseId } : {}), showContent: input.showContent === true, showFailedContent: true });
       try { view = await readView(session, path); }
       catch { uncertain = true; throw new ViewError("outcome-unknown"); }
       if (view.file.revision !== targetRevision) throw new ViewError("revision_mismatch");
@@ -317,7 +354,7 @@ export function createActionHandler({ session, path }) {
             && JSON.stringify(proof) === JSON.stringify(view.latest.result)
             && view.latest.result.verdict !== "pass" && !view.latest.result.fullPass;
           if (view.file.revision === targetRevision && (fresh || saved && !failedPreview && view.latest.status !== "current")) response.view = view;
-          if (response.view && fresh && proof.reasonCode === "copilot_model_unavailable") response.message = proof.reason;
+          if (response.view && fresh && proof.reason) response.message = proof.reason;
           if (response.view && fresh && !ids.length && view.latest.result.reasonCode === "no_tests") Object.assign(response, { error: "no-tests", message: MESSAGES["no-tests"] });
         } catch { /* Preserve the draft when refresh cannot be confirmed. */ }
       }
@@ -451,7 +488,7 @@ export function createViewController({ getSession }) {
   const instances = new Map(); // instanceId -> { path, ready }
   const stop = (entry) => entry.ready.then((b) => b.close(), () => {});
 
-  async function open(ctx) {
+  async function open(ctx, validatedView) {
     const input = ctx?.input;
     if (!isObj(input) || Object.keys(input).some((k) => k !== "path")) throw new ViewError("invalid-path");
     const path = normalizePath(input.path);
@@ -462,7 +499,9 @@ export function createViewController({ getSession }) {
     if (existing?.path !== path) {
       const session = getSession();
       if (!session) throw new ViewError("unavailable");
-      entry = { path, ready: startViewBridge({ session, path }) };
+      const title = (validatedView ? Promise.resolve(validatedView) : readView(session, path)).then(view => agentName(view.title), () => fileLocation(path).name);
+      entry = { path, ready: Promise.all([startViewBridge({ session, path }), title]).then(([bridge, name]) => ({ ...bridge,
+        title: name + (fileLocation(path).folder ? ` · ${fileLocation(path).folder}` : "") })) };
       instances.set(id, entry);
       entry.ready.catch(() => instances.get(id) === entry && instances.delete(id));
       if (existing) await stop(existing);
@@ -470,7 +509,7 @@ export function createViewController({ getSession }) {
     try {
       const bridge = await entry.ready;
       if (instances.get(id) !== entry) throw new ViewError("unavailable");
-      return { url: bridge.url, title: "Agent view", status: "Agent file" };
+      return { url: bridge.url, title: bridge.title, status: "Agent file" };
     } catch (e) {
       throw safeError(e);
     }

@@ -10,8 +10,21 @@ import (
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/runtime"
 )
 
+func previewStateHome(t *testing.T) string {
+	t.Helper()
+	// Match the journal fixture contract: even system temp ancestors such as
+	// macOS /var must be physical paths, not symlinks.
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Let the state helper create its private leaf; TempDir inherits a broader
+	// ACL on Windows rather than the journal's owner-only permissions.
+	return filepath.Join(home, "state")
+}
+
 func TestPreviewToolsUseJournaledLocalRunner(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "state")
+	home := previewStateHome(t)
 	t.Setenv("KMX_HOME", home)
 	files, _, source := canonicalFiles(t)
 	saved, err := files.Create(t.Context(), "greeter.agent.md", []byte(source))

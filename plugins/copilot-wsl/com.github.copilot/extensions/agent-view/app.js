@@ -1,7 +1,7 @@
 // Resource and authoring values are untrusted: render only inert DOM text.
-import { instructionSections, runtimeModelSelection } from "./authoring.mjs";
+import { instructionSections, runtimeModelSelection, agentName, fileLocation, effectiveModel } from "./authoring.mjs";
 import { el, inlineText, editorValue, insertPlainText, fillEditor, purposeText, instructionsContent, runtimeModelControl, testNameControl, pathControls, icon, statusIcon,
-  checkKey, uniqueIndex, inspectCases, friendlyName, clone, same, operandKey, EDITABLE_TYPES, quoted, checkLabel, oneLine, failureFacts, testRow, coherentSelection, ambiguousPassSet, countText, plural, modelText, resultHistory, resultPill, modelLabel, growTextarea, checkTypeControl } from "./editor.mjs";
+  checkKey, uniqueIndex, inspectCases, friendlyName, clone, same, operandKey, EDITABLE_TYPES, quoted, checkLabel, oneLine, failureFacts, testRow, coherentSelection, ambiguousPassSet, countText, plural, resultHistory, resultPill, modelLabel, modelPresentation, growTextarea, checkTypeControl, checkFields, checkComplete, convertCheck, inconclusiveJudge, judgeDetails } from "./editor.mjs";
 export { provenActual } from "./editor.mjs";
 const CONFLICTS = ["revision_mismatch", "revision-mismatch"];
 const UNKNOWN = ["outcome-unknown", "uncertain-outcome", "uncertain_outcome"];
@@ -77,7 +77,7 @@ export function renderView(doc, root, payload, execute = postAction, options = {
     if (intended.filter((e) => e.id === raw.id).length !== 1) return "Another test already has this name.";
     if (!raw.input.trim()) return "Say what the agent gets.";
     if (!raw.assertions.length) return "Keep at least one check.";
-    if (raw.assertions.some((a) => EDITABLE_TYPES.some(([t]) => t === a.type) && !String(a[operandKey(a.type)] ?? "").trim())) return "Fill in every check.";
+    if (raw.assertions.some(a => !checkComplete(a))) return "Fill in every check.";
   }
   function noteDraft(key, draft) {
     const origin = draft.origin && rawExamples().find((e) => `id:${e.id}` === key);
@@ -154,7 +154,7 @@ export function renderView(doc, root, payload, execute = postAction, options = {
       } else if (unknown || response.saved === true || (response.error === "action-failed" && ["test", "run"].includes(operation))) {
         blocked = true; savedUntested = response.saved === true;
         message = CONFLICTS.includes(response.error) ? "Changed elsewhere during the run. Your draft is still here. Reload and discard draft to continue."
-          : response.saved ? "Saved, but not tested for this revision. Your draft is still here. Reload before continuing."
+          : response.saved ? "Saved; test result unconfirmed. Your draft is still here. Reload before continuing."
           : response.message || "Outcome not confirmed. Reload deliberately to inspect the saved file.";
       } else if (response.error === "permission_required" && tested) {
         runAlert = { text: response.message || "", saved: false, one: values.caseId };
@@ -366,23 +366,25 @@ export function renderView(doc, root, payload, execute = postAction, options = {
   }
 
   function header(button, updates) {
-    const displayName = base.title.split(" — ")[0] || base.title;
-    // Quiet file name and model sit beside the title. Their disclosure keeps the
-    // path, revision, other canonical sections and privacy controls available.
-    const fileName = base.file.path.split("/").pop(), model = base.model ? modelText(base.model) : "";
+    const displayName = agentName(base.title), file = fileLocation(base.file.path);
+    // One name and model, with source details still available from the file line.
     const source = el(doc, "details", "source-details"), info = el(doc, "div", "source-info");
-    const sourceSummary = el(doc, "summary", "meta agent-meta", model ? `${fileName} · ${model}` : fileName);
+    const sourceSummary = el(doc, "summary", "meta agent-meta", `${file.name}${file.folder ? ` · in ${file.folder}` : ""}`);
     sourceSummary.setAttribute("title", "Source details"); source.append(sourceSummary, info);
     info.append(el(doc, "p", "source-title", base.title), pathControls(doc, base.file.path), el(doc, "code", "revision", base.file.revision));
-    const head = el(doc, "header", "agent-header"), titleLine = el(doc, "div", "title-line");
-    titleLine.append(el(doc, "h1", "", displayName), source);
-    const pill = resultPill(doc, resultSummary); titleLine.append(pill.node); updates.push(pill.update);
+    const head = el(doc, "header", "agent-header"), identity = el(doc, "div", "agent-identity"), actions = el(doc, "div", "header-controls");
+    identity.append(el(doc, "span", "agent-eyebrow", "Your agent"), el(doc, "h1", "", displayName));
+    const pill = resultPill(doc, resultSummary); actions.append(pill.node); updates.push(pill.update);
     if (snap) {
-      modelControl.update(); controls.push({ node: modelControl.select, guard: "idle" }); titleLine.append(modelControl.node);
+      updates.push(modelControl.update); controls.push({ node: modelControl.trigger, guard: "idle" }); actions.append(modelControl.node);
+    } else {
+      const id = effectiveModel(base.model, "", base.chatModel);
+      const model = el(doc, "span", "model-readonly", `${modelPresentation(id).name} · ${base.model ? "from the agent file" : "default"}`);
+      model.setAttribute("title", id); actions.append(model);
     }
     const purpose = purposeText(base), summary = el(doc, "p", "purpose");
     const chars = Array.from(purpose); summary.textContent = chars.length > 160 ? chars.slice(0, 159).join("") + "…" : purpose;
-    head.append(titleLine, summary);
+    identity.append(summary, source); head.append(identity, actions);
     if (chars.length > 160) info.append(el(doc, "p", "", purpose));
     return { head, info };
   }
@@ -403,11 +405,16 @@ export function renderView(doc, root, payload, execute = postAction, options = {
       }
       refresh();
     };
+    const lineBreak = () => { if (!busy && !blocked) { insertPlainText(doc, node, "\n"); changed(); } };
     node.addEventListener("input", changed);
+    node.addEventListener("beforeinput", event => {
+      if (event.inputType === "insertLineBreak" && event.cancelable && !event.isComposing) { event.preventDefault(); lineBreak(); }
+    });
     node.addEventListener("keydown", (event) => {
       if (event.isComposing) return;
-      if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
-        event.preventDefault(); route.name === "detail" ? submitOne(route.key) : submitAll();
+      if (event.key === "Enter" && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        if (event.shiftKey) lineBreak(); else route.name === "detail" ? submitOne(route.key) : submitAll();
       } else if (event.key === "Escape" && sectionDrafts.has(section.key)) {
         event.preventDefault(); sectionDrafts.delete(section.key); invalidEditors.delete(section.key); render();
       }
@@ -433,7 +440,7 @@ export function renderView(doc, root, payload, execute = postAction, options = {
       const what = pending.one ? "this test" : tests;
       return pending.operation === "save-and-test" ? `Saving and running ${what}…` : `Saved · running ${what}`;
     }
-    if (blocked) return savedUntested ? "Saved · tests didn't run" : "Reload required · result unconfirmed";
+    if (blocked) return savedUntested ? "Saved · test result unconfirmed" : "Reload required · result unconfirmed";
     if (invalidEditors.size) return "Edited · unsupported formatting, reload before saving";
     if (candidate) return "Edited · settle the outside change before saving";
     if (scope === "one") return sectionDrafts.size || testDrafts.has(route.key)
@@ -441,8 +448,7 @@ export function renderView(doc, root, payload, execute = postAction, options = {
     if (!n) return hasDrafts() ? "Edited · Enter saves" : "Saved · add a test to run it";
     if (hasDrafts()) return `Edited · Enter saves and runs ${tests}`;
     if (runAlert?.saved && !runAlert.finished) return "Saved · tests didn't run";
-    if (lastRun && !lastRun.one) return `Saved · ran ${tests} just now`;
-    return `Saved · Enter runs ${tests}${base.latest.status === "current" ? " again" : ""}`;
+    return `Saved · Enter runs ${tests}`;
   }
   function saveButton(button, label, action, className = "ib save-run") {
     const node = button("", action, className, "save");
@@ -459,7 +465,7 @@ export function renderView(doc, root, payload, execute = postAction, options = {
 
   function mainView(button, status, updates) {
     const { head, info } = header(button, updates);
-    const promptSection = el(doc, "section", "prompt-section"), promptBox = el(doc, "div", "prompt-box");
+    const promptSection = el(doc, "section", "prompt-section"), promptBox = el(doc, "div", "prompt-box main-prompt");
     const promptLabel = el(doc, "h2", "lbl", "Prompt");
     const foot = el(doc, "div", "prompt-foot");
     if (snap) {
@@ -769,42 +775,43 @@ export function renderView(doc, root, payload, execute = postAction, options = {
       const display = editableTest ? displayChecks.get(checkKey(a)) : a;
       const observed = display && c?.expected?.get(checkKey(display)) === display ? c.checks?.get(checkKey(display)) : undefined;
       const row = el(doc, "div", "check"), state = el(doc, "span", "check-state"), verdict = el(doc, "span", "check-verdict");
+      const judge = a.type === "llmJudge", details = judge ? judgeDetails(doc) : undefined;
+      const judgeResult = details?.node;
       updates.push(() => {
         let kind = "none", label = "No result";
         const completed = !ambiguousPassSet(base) && (c?.state === "pass" || c?.state === "fail");
         if (completed && !blocked && draft()?.origin !== null && observed?.verdict === "pass") [kind, label] = ["pass", "Passed"];
         else if (completed && !blocked && draft()?.origin !== null && observed?.verdict === "fail") [kind, label] = ["fail", "Failed"];
+        else if (judge && !ambiguousPassSet(base) && !blocked && draft()?.origin !== null && inconclusiveJudge(c, observed)) [kind, label] = ["error", "Inconclusive"];
+        const text = kind === "none" ? "" : label;
         if (kind !== "none" && local()) [kind, label] = [`old-${kind}`, `${label} last run`];
         state.replaceChildren(statusIcon(doc, kind, label));
-        verdict.textContent = kind === "none" ? "" : observed.verdict === "pass" ? "Passed" : "Failed";
+        verdict.textContent = text ? `${judge ? "Judge " : ""}${text}${judge && local() ? " · last run" : ""}` : "";
         verdict.setAttribute("data-tone", kind);
+        if (details) details.update(editableTest ? current().assertions[index] : a, observed, kind !== "none", local());
       });
       const known = editableTest && EDITABLE_TYPES.some(([t]) => t === a.type);
       if (known) {
         const editKey = `${key}/${a.id}`, edit = el(doc, "div", "check-edit");
-        let type = a.type;
-        const value = el(doc, "input", "field check-value"); value.type = "text"; value.value = a[operandKey(a.type)] ?? "";
-        value.setAttribute("aria-label", `Check ${index + 1} text`); value.setAttribute("spellcheck", "false");
-        const line = button("", () => { editingChecks.add(editKey); refresh(); value.focus(); }, "check-line");
-        line.append(state, el(doc, "span", "check-label", checkLabel({ type: a.type, fields: [[operandKey(a.type), value.value]] })));
-        const apply = () => {
-          editingChecks.add(editKey);
-          mutate(d => {
-            const target = d.raw.assertions[index], oldKey = operandKey(target.type), newKey = operandKey(type);
-            if (oldKey !== newKey) delete target[oldKey];
-            target.type = type; target[newKey] = value.value;
-          });
-        };
-        const choice = checkTypeControl(doc, type, chosen => { type = chosen; apply(); }, cancelDraft);
-        value.addEventListener("input", apply); fieldKeys(value);
+        const fields = checkFields(doc, a, index, (field, value) => {
+          editingChecks.add(editKey); mutate(d => { d.raw.assertions[index][field] = value; });
+        }, fieldKeys);
+        const line = button("", () => { editingChecks.add(editKey); refresh(); fields.focus(); }, "check-line");
+        line.append(state, el(doc, "span", "check-label", checkLabel({ type: a.type, fields: [[operandKey(a.type), a[operandKey(a.type)] ?? ""]] })));
+        const choice = checkTypeControl(doc, a.type, chosen => {
+          const wasJudge = current().assertions[index].type === "llmJudge";
+          editingChecks.add(editKey); mutate(d => convertCheck(d.raw.assertions[index], chosen));
+          if (wasJudge || chosen === "llmJudge") {
+            render(); root.querySelectorAll(".check-type-button")[index]?.focus();
+          } else { fields.show(current().assertions[index]); refresh(); }
+        }, cancelDraft);
         const remove = button("", () => { mutate(d => { d.raw.assertions.splice(index, 1); }); render(); }, "ib remove-check");
         remove.setAttribute("aria-label", `Remove check ${index + 1}`); remove.append(icon(doc, "none", 14, 2));
-        edit.append(remove, choice.node, value, verdict); row.append(line, edit);
+        edit.append(remove, choice.node, fields.node, ...(judge ? [] : [verdict])); row.append(line, edit);
         updates.push(() => {
           const editing = draft()?.origin === null || editingChecks.has(editKey);
           line.hidden = editing; edit.hidden = !editing;
-          value.disabled = busy || blocked; choice.update(busy || blocked);
-          value.setAttribute("placeholder", type === "contains" ? "Text the answer must contain" : type === "notContains" ? "Text the answer must not contain" : "Pattern the answer must match");
+          fields.update(busy || blocked); choice.update(busy || blocked);
         });
       } else {
         const body = el(doc, "div", "check-readonly");
@@ -825,6 +832,7 @@ export function renderView(doc, root, payload, execute = postAction, options = {
         remove.append(icon(doc, "trash", 14, 2)); row.append(remove);
       }
       checks.append(row);
+      if (judgeResult) { judgeResult.append(verdict, details.score, details.reason); checks.append(details.binding, judgeResult); }
       const checkFacts = display && c && !blocked && draft()?.origin !== null ? failureFacts(c, display) : undefined;
       if (checkFacts) {
         // Repairs belong to the saved assertion they explain, not a later type
@@ -931,14 +939,14 @@ export function renderView(doc, root, payload, execute = postAction, options = {
   }
 
   const modelControl = runtimeModelControl(doc,
-    () => ({ authored: base.model, selected: modelChoice.override, needsRun: modelChoice.needsRun }),
+    () => ({ authored: base.model, selected: modelChoice.override, chatModel: base.chatModel, disabled: busy || blocked || invalidEditors.size > 0 }),
     options.fetchModels ?? (() => execute({ operation: "models" })), (value) => {
       if (busy || blocked) return;
       observationGeneration++;
       if (modelChoice.choose(value, base)) {
         base = modelChoice.view(base); lastRun = undefined; runAlert = undefined;
       }
-      render(); modelControl.select.focus();
+      render(); modelControl.trigger.focus();
     });
   render();
   return {

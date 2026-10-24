@@ -288,8 +288,10 @@ or `gpt-5.6-terra` when the Model section is omitted;
 an explicit trusted `--provider` and, for local routes, `--endpoint`, validated by model access;
 there is no discovery, installation, sign-in or fallback inside Run/Test. The
 caller supplies any judge-route override through the App API; otherwise the
-judge uses the exact agent route, never an independently chosen route. Conflicting
-authored judge models refuse rather than silently switching.
+judge uses the exact agent route, never an independently chosen route. A canonical
+file Judge without `judgeModel` follows that route; conflicting authored pins still
+refuse rather than silently switching. `judgeVersion` stays authored and required.
+Strict workspace assertions and exported run profiles still require a model pin.
 
 Output defaults to text; `-o json` returns one versioned `schemaVersion: 1`,
 `kind: kmx.agent-file-preview` document. Both preserve operation, exact source-byte
@@ -375,8 +377,14 @@ See the [wire format and hash rules](agent-file.md#frozen-run-profile-export-unr
 `kmx mcp` serves exactly `create`, `edit`, `run` and `test`, using the canonical
 parser and the same App snapshot operation as file Run/Test. One server accepts
 agent files in any directory. Prefer an absolute WSL path when calling it from
-Windows; relative paths resolve against the server's working directory. It does
-not listen on a network socket or load cluster/workspace configuration.
+Windows; relative paths resolve against the server's working directory. In WSL,
+Windows drive-absolute paths such as `C:\work\repo\agent.agent.md` resolve to
+`/mnt/c/work/repo/agent.agent.md` when that drive directory exists. The same drive
+check applies to Linux `/mnt/<letter>/...` inputs, including paths sent by the
+builder. Missing drives and Windows UNC/device or drive-relative paths (`C:agent.agent.md`) return the
+existing `unsafe_path` error; use a full WSL path for a custom automount root.
+Other Unix hosts refuse Windows drive paths. Requested paths stay unchanged in responses.
+The server does not listen on a network socket or load cluster/workspace configuration.
 Optional `--root /absolute/project` retains the old bound mode for existing
 plugins and separately configured native Squad operations; the default is unbound.
 
@@ -545,18 +553,49 @@ editability. A restart has no current result;
 a revision change marks the old observation stale and withholds its details.
 Reads perform no inference, mutation or journal retrieval.
 
-The [WSL Copilot plugin](../plugins/copilot-wsl/README.md) adds a
+The [Windows/WSL plugin](../plugins/copilot-wsl/README.md) and
+[macOS/PATH plugin](../plugins/copilot/README.md) share a
 native authoring canvas and read-only `/agent-view PATH` text fallback over this
 resource. Canvas Edit/Test/Run use existing same-session MCP tools; only explicit
-**Suggest tests** starts chat, asking Copilot to save additional tests through
-revision-checked Edit without running them. Its status acknowledges the request,
-not a completed addition. Saves require the original revision; changed result
+**Suggest tests** starts chat with the exact saved source, path and revision,
+asking Copilot for one revision-checked Edit without running tests or requiring a
+resource-reader tool. Its status acknowledges the request, not a completed addition. Saves require the original revision; changed result
 revisions are labelled stale rather than silently rebasing the draft.
 Inspection can show a minimal titled agent as well as a canonical Squad charter;
 this display-only support does not change Run/Test parser acceptance.
 
+The canvas check chooser offers Contains, Not contains, Regex and Judge. Judge
+edits the existing `llmJudge` fields: a multiline rubric, integer minimum score
+from 0 through 100, optional judge model and required authored judge version.
+Leaving the model blank follows the run model; an explicit model stays pinned and
+is labelled in the row. The canvas invents no score or version. Zero is valid.
+Enter saves and runs the current test; Shift+Enter adds a rubric line break and
+Esc discards that test's draft. Changing check type keeps its ID and operand text,
+removing judge-only metadata when changing away from Judge.
+
+Judge details show the observed Passed, Failed or Inconclusive verdict. With the
+existing content opt-ins, a validated per-assertion `judge` display includes both
+sample `scores`, `minScore` and bounded, sanitized `reasons`; two samples are never
+averaged. Reasons stay out of list rows, ordinary summaries and receipt evidence.
+Draft or model changes keep prior results stale until a new run confirms them.
+MCP judging follows the agent's effective model unless pinned; an authored pin
+must match that route. Judge version remains authored identity, not host SDK metadata.
+Every fresh, matching refused/failed preview can show kmx's safe reason; revision,
+model, selection and invocation-proof checks still prevent attributing old failures.
+
 The canvas Model picker is session-only: override → authored Model.Preferred →
-`gpt-5.6-terra`. Selecting a model never edits the file or its saved-source history.
+known chat model → `gpt-5.6-terra`. Selecting a model never edits the file or its
+saved-source history. A following default uses the chat model read when Run/Test
+starts and freezes it through any save and execution; the displayed observation
+can lag a chat change until the next idle refresh. Explicit choices still win.
+The optional joined-session SDK `model.getCurrent()` getter
+supplies the exact chat `modelId`; unavailable getters use the established default.
+Transient getter failures or metadata deadlines retain the last valid observation,
+while successful
+unknown/auto/invalid responses clear it. A known ID is sent exactly even if absent
+from the catalog; execution refusal never silently substitutes another model.
+Canvas tab titles use the agent name and folder at instance creation;
+there is no live host tab-title update.
 Changing the effective model makes old results stale; another run must confirm the
 selected model, including after an A → B → A switch. Missing Model is valid for
 canonical authoring; a present blank/invalid Model remains invalid. Run/Test v1
@@ -566,8 +605,16 @@ An unknown catalog model fails in one line listing the available choices.
 Unbound/default-Copilot servers expose read-only `kmx://models` with
 `schemaVersion: 1`, `kind: "kmx.models"`, `defaultModel` and `models` (exact IDs).
 Discovery is lazy, adds no tool and starts neither sign-in nor inference. The
-picker loads it on focus; discovery failure leaves editing and fake/offline
-execution available. Explicit non-Copilot and legacy bound routes stay unchanged.
+picker loads and caches it when opened, not on startup or focus. Familiar model
+IDs have presentation-only display names and family groups; unknown IDs stay
+literal. The button distinguishes this canvas, the agent file and the default,
+and the menu marks the known current chat model. Selecting any model ID pins it,
+even when it equals the current default. The separate following action returns to
+the agent-file/default choice without adding a duplicate model entry.
+Discovery failure leaves editing
+and fake/offline execution available. Explicit non-Copilot and legacy provider,
+endpoint and credential bindings stay unchanged; model selection does not switch
+those bindings.
 
 Unbound `kmx mcp` uses Copilot for the effective non-fake model when no startup
 route is selected. Effective `fake` remains offline. Explicit trusted `--provider`
@@ -788,7 +835,6 @@ See [digest deploy](suite-workspace.md#digest-lift) for gates and partial outcom
 | `kmx suite pull <repository:tag> --from-layout <layout> --output <directory>` | resolve and validate one AgentSuite reference from a local OCI image layout, then atomically extract its content into a new directory. Existing output is never replaced. |
 | `kmx suite policy FILE [--administrative-policy FILE]` | resolve a portable v1 deny-write or v2 IPv4/TCP egress policy offline; print canonical effective JSON then its digest. Administrative deny paths union; administrative network allowances intersect (empty denies all). Inputs and output are bounded to 4 MiB; explicit empty administrative flags refuse. No operational configuration, enforcement or provider selection. [Policy contract](portable-policy.md) |
 | `kmx suite validate <path>` | validate an extracted AgentSuite content directory or OCI image layout offline, including strict JSON, canonical identities, closed references, tool locks, build profiles and archive safety. `-o json` emits the validated summary. [AgentSuite specification](https://github.com/agent-primitives/suite/blob/main/spec.md) |
-| `kmx suite diff <before> <after>` | validate and semantically compare two extracted AgentSuites or local OCI image layouts, including supplemental packaged content and artifact identities. The default unified view uses `-` and `+` field lines; `--view split` renders before and after values side by side, and `-o json` emits the versioned change and affected-agent report. [Suite artifact diff](#suite-artifact-diff). |
 | `kmx test from-sessions UID... --sessions SOURCE --assertions CASE.yaml --out MANIFEST.json` | Independent private reference extraction/export only. [Reference extraction](#reference-extraction) |
 | `kmx test explain [failure-id] [--workspace DIR\|--file FILE] [--show-content\|--clear]` | inspect private local failures offline without operational config or model calls; metadata by default, bounded content only with --show-content. `--clear` removes one ID, or all only with an explicit workspace or file subject, never journals, source history, passing proof or runtime history. Owner-only retention keeps the last 10 non-pass records per subject, 64 KiB answers and 128 KiB records. [Local failure inspection](suite-workspace.md#inspect-or-clear-local-evaluation-failures) |
 | `kmx test diff BEFORE AFTER` | Offline strict full-passing native suite evidence only; old bundle receipts unreadable. [Native receipt diff](#native-receipt-diff) |
@@ -1035,47 +1081,9 @@ artifact rather than a mutable tag.
 
 #### Suite artifact diff
 
-`kmx suite diff <before> <after>` validates and compares two extracted content
-directories or local OCI layouts without registry or cluster access. Logical
-records are matched by AgentSuite identity. Identity-keyed collections such as
-agent invocation edges and ToolProvider selections are compared as sets;
-behaviorally ordered values such as process arguments remain positional.
-Added or removed identity-keyed elements are reported as one field containing
-the complete element, and added or removed supplemental content records use one
-aggregate `$` field, so large valid additions do not exhaust field limits by
-expanding every leaf.
-Supplemental packaged files, including `metadata/kmx/`, are compared by path,
-mode, size and digest. A raw packaged-content identity change is still reported
-when all modeled records remain semantically equal.
-
-The report identifies each side by suite name, source type and a
-representation-neutral content digest. OCI-layout inputs also include their
-authoritative manifest digest. The content digest is SHA-256 over the sorted inventory of non-directory path,
-filesystem-equivalent type, mode, size, file digest and symbolic-link target.
-Archive hardlinks inherit their target file metadata and explicit directory
-headers are excluded, so equivalent extracted and OCI-layout content has the
-same identity. A standalone
-ToolProvider composition and its build profile remain record changes but do not
-affect an agent without an explicit AgentSuite relationship.
-
-An OCI manifest-digest change is reported even when both manifests reference
-identical packaged content. Differences are a successful comparison and exit
-with status 0; validation, loading, usage and output failures return a nonzero
-status.
-
-`-o json` emits the pinned `kmx.agentsuite.diff/v1` envelope. `changes` and
-`affectedAgents` are always arrays, including for an unchanged comparison.
-The report refuses more than 10,000 changed fields in one record, 20,000
-changed fields in total, 10,000 changed records, or an indented JSON
-representation larger than 8 MiB; unchanged fields do not consume these
-limits, and automation output is never silently truncated.
-
-Human output strips terminal controls and Unicode format/bidirectional controls,
-and renders artifact-derived labels on one line.
-With a measured terminal width, split output constrains every report line and
-falls back to unified rows when two useful columns do not fit. When output width
-is unknown, split rows remain unwrapped and unpadded rather than assuming a
-terminal size.
+`kmx suite diff` has been removed. There is no replacement CLI command for
+semantic package comparison. The upstream AgentSuite `oci.DiffPaths` API remains
+available; `kmx test diff` still compares passing evaluation receipts, not packages.
 
 #### Suite provenance
 

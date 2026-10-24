@@ -2,15 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-import {createActionHandler,readView,startViewBridge} from '../../../../copilot-wsl/com.github.copilot/extensions/agent-view/view.mjs';
-import {instructionSections,replaceInstructions,replaceExamples} from '../../../../copilot-wsl/com.github.copilot/extensions/agent-view/authoring.mjs';
-const original=await readFile(new URL('../../../../../internal/kmx/agentfile/testdata/greeter.agent.md',import.meta.url),'utf8');
+import {createActionHandler,readView,startViewBridge} from '../../copilot-wsl/com.github.copilot/extensions/agent-view/view.mjs';
+import {instructionSections,replaceInstructions,replaceExamples} from '../../copilot-wsl/com.github.copilot/extensions/agent-view/authoring.mjs';
+const original=await readFile(new URL('../../../internal/kmx/agentfile/testdata/greeter.agent.md',import.meta.url),'utf8');
 const revision=s=>'sha256:'+createHash('sha256').update(s).digest('hex');
-function harness(){
- let source=original,latest={status:'none'};
+function harness({omitModel=false,fixture=original}={}){
+ let source=omitModel?fixture.replace(/## Model\r?\n[\s\S]*?(?=## Examples)/,''):fixture,latest={status:'none'};
  const calls=[],o={};let race=false,denied=false,unavailable=false,release;
  let examples=[{id:'greeting',input:'Ada',assertions:[{id:'greeting-text',type:'contains',value:'Hello, Ada'}]}];
- const raw=()=>({schemaVersion:1,kind:'kmx.agent-view',file:{path:'greeter.agent.md',revision:revision(source)},title:'Greeter',instructions:source,model:'fake',examples,authoring:{source,editable:true},latest});
+ const raw=()=>({schemaVersion:1,kind:'kmx.agent-view',file:{path:'greeter.agent.md',revision:revision(source)},title:'Greeter',instructions:source,model:omitModel?'':'fake',examples,authoring:{source,editable:true},latest});
  const session={rpc:{mcp:{resources:{read:async({uri})=>({contents:[{uri,text:JSON.stringify(raw())}]})}},tools:{getCurrentMetadata:async()=>({tools:['edit','test','run'].map(op=>({name:'owned-'+op,mcpServerName:'kmx-agent-builder',mcpToolName:op}))}),execute:async request=>{
   calls.push(request);assert.equal(request.arguments.schemaVersion,1);assert.equal(request.arguments.path,'greeter.agent.md');
   if(unavailable)throw Error('private transport secret');
@@ -38,6 +38,81 @@ test('runtime model override reaches Run/Test and save-and-test without changing
   assert.equal(h.source(),original);assert.equal(r.view.model,'fake');assert.equal(r.view.latest.result.modelRoute,'copilot/choice-b');
  }
 });
+test('missing-Model runtime defaults exercise actual LF and CRLF source snapshots',async()=>{
+ for(const eol of ['\n','\r\n']){
+  const h=harness({omitModel:true,fixture:original.replace(/\r?\n/g,eol)});
+  assert.doesNotMatch(h.source(),/^## Model\r?$/m);
+  h.session.rpc.model={getCurrent:async()=>({modelId:'chat-model'})};
+  h.o.shape=r=>({...r,modelRoute:{provider:'copilot',model:h.calls.at(-1).arguments.model}});
+  const response=await h.act({operation:'test',expectedRevision:revision(h.source())});
+  assert.equal(response.error,undefined);assert.equal(h.calls.at(-1).arguments.model,'chat-model');
+  assert.doesNotMatch(response.view.authoring.source,/^## Model\r?$/m);
+ }
+});
+
+test('known uncatalogued chat default is sent exactly without eager catalog or source Model',async()=>{
+ const h=harness({omitModel:true}),source=h.source(),read=h.session.rpc.mcp.resources.read;
+ h.session.rpc.model={getCurrent:async()=>({modelId:'known-unlisted'})};
+ h.session.rpc.mcp.resources.read=async args=>{assert.notEqual(args.uri,'kmx://models');return read(args)};
+ h.o.shape=r=>({...r,modelRoute:{provider:'copilot',model:h.calls.at(-1).arguments.model}});
+ const r=await h.act({operation:'test',expectedRevision:revision(source)});
+ assert.equal(r.error,undefined);assert.equal(h.calls.at(-1).arguments.model,'known-unlisted');
+ assert.doesNotMatch(r.view.authoring.source,/## Model/);assert.equal(h.source(),source);
+ h.o.failTest=true;h.o.shape=r=>({...r,state:'refused',modelRoute:{}});
+ assert.equal((await h.act({operation:'test',expectedRevision:revision(source)})).error,'action-failed');
+ assert.equal(h.calls.at(-1).arguments.model,'known-unlisted');
+});
+test('optional metadata deadline preserves the known model and ignores late replies',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});
+ for(const known of [undefined,'chat-a']){
+  const h=harness({omitModel:true});let release;
+  if(known){h.session.rpc.model={getCurrent:async()=>({modelId:known})};await readView(h.session,'greeter.agent.md')}
+  h.session.rpc.model={getCurrent:()=>new Promise(resolve=>{release=resolve})};
+  let settled=false;const pending=readView(h.session,'greeter.agent.md').then(view=>{settled=true;return view});
+  t.mock.timers.tick(2000);await new Promise(setImmediate);
+  assert.equal(settled,true,'optional host metadata must not stall an otherwise valid resource');
+  const view=await pending;assert.equal(view.chatModel,known);assert.equal(view.authoring.source,h.source());
+  h.session.rpc.model.getCurrent=async()=>({modelId:'chat-b'});
+  assert.equal((await readView(h.session,'greeter.agent.md')).chatModel,'chat-b');
+  release({modelId:'late-chat'});await new Promise(setImmediate);
+  assert.equal((await readView(h.session,'greeter.agent.md')).chatModel,'chat-b');assert.equal(h.calls.length,0);
+ }
+});
+
+test('explicit auto/invalid host metadata clears known chat forwarding, while throws retain it',async()=>{
+ for(const next of [undefined,'auto','bad\nID',42,'throw']){
+  const h=harness({omitModel:true});let current='chat-a';
+  h.session.rpc.model={getCurrent:async()=>{if(current==='throw')throw Error('transient');return{modelId:current}}};
+  assert.equal((await readView(h.session,'greeter.agent.md')).chatModel,'chat-a');current=next;
+  h.o.shape=r=>({...r,modelRoute:{provider:'copilot',model:h.calls.at(-1).arguments.model??'gpt-5.6-terra'}});
+  const response=await h.act({operation:'test',expectedRevision:revision(h.source())});
+  assert.equal(response.error,undefined);assert.equal(h.calls.at(-1).arguments.model,next==='throw'?'chat-a':undefined);
+  assert.equal(response.view.chatModel,next==='throw'?'chat-a':undefined);
+ }
+});
+test('default follows chat at action start rather than the last displayed observation',async()=>{
+ const h=harness({omitModel:true});let current='chat-a';
+ h.session.rpc.model={getCurrent:async()=>({modelId:current})};
+ const displayed=await readView(h.session,'greeter.agent.md');current='chat-b';
+ h.o.shape=r=>({...r,modelRoute:{provider:'copilot',model:h.calls.at(-1).arguments.model}});
+ const response=await h.act({operation:'test',expectedRevision:displayed.file.revision});
+ assert.equal(displayed.chatModel,'chat-a');assert.equal(response.error,undefined);
+ assert.equal(h.calls.at(-1).arguments.model,'chat-b');
+ assert.equal(response.view.latest.result.modelRoute,'copilot/chat-b');
+ assert.doesNotMatch(h.source(),/## Model/);
+});
+
+test('a save freezes its selected chat model even if later host metadata changes',async()=>{
+ const h=harness({omitModel:true});let current='chat-a';
+ h.session.rpc.model={getCurrent:async()=>({modelId:current})};
+ const execute=h.session.rpc.tools.execute;h.session.rpc.tools.execute=async request=>{const response=await execute(request);if(request.name==='owned-edit')current='chat-b';return response};
+ h.o.shape=r=>({...r,modelRoute:{provider:'copilot',model:h.calls.at(-1).arguments.model}});
+ const sections=instructionSections(h.source());sections[0].text+='\nKeep it short.';
+ const response=await h.act({operation:'save-and-test',expectedRevision:revision(h.source()),sections});
+ assert.equal(response.error,undefined);assert.equal(h.calls.at(-1).arguments.model,'chat-a');
+ assert.equal(response.view.chatModel,'chat-b');assert.equal(response.view.latest.result.modelRoute,'copilot/chat-a');
+ assert.doesNotMatch(h.source(),/## Model/);
+});
 test('same-revision observation from a different model cannot confirm this invocation',async()=>{
  const h=harness();const r=await h.act({operation:'test',expectedRevision:revision(original),model:'choice-b'});
  assert.equal(r.error,'outcome-unknown');assert.equal(r.view,undefined);
@@ -47,6 +122,32 @@ test('model catalog reads only its owned resource, with no tool or chat invocati
  h.session.rpc.mcp.resources.read=async args=>{reads.push(args);return{contents:[{text:JSON.stringify({schemaVersion:1,kind:'kmx.models',defaultModel:'gpt-5.6-terra',models:['choice-a','choice-b']})}]}};
  const r=await h.act({operation:'models'});assert.equal(r.error,undefined);assert.deepEqual(r.models,['choice-a','choice-b']);
  assert.deepEqual(reads,[{serverName:'kmx-agent-builder',uri:'kmx://models'}]);assert.equal(h.calls.length,0);
+});
+for(const [state,reasonCode] of [['refused','model_unavailable'],['error','journal_failed']])test(`current ${state} preview surfaces its verified backend reason (${reasonCode})`,async()=>{
+ const h=harness(),reason='The selected Judge model cannot be used for this preview.';
+ h.o.failTest=true;h.o.shape=r=>({...r,state,reasonCode,reason});
+ const response=await h.act({operation:'test',expectedRevision:revision(original)});
+ assert.equal(response.error,'action-failed');assert.equal(response.message,reason);
+ assert.equal(response.view.latest.result.reasonCode,reasonCode);assert.doesNotMatch(JSON.stringify(response),/private detail/);
+});
+test('an unconfirmed failed-preview reason cannot replace outcome uncertainty',async()=>{
+ const h=harness(),read=h.session.rpc.mcp.resources.read;h.o.failTest=true;
+ h.o.shape=r=>({...r,state:'refused',reason:'Judge route unavailable.'});
+ h.session.rpc.mcp.resources.read=async args=>{
+  const response=await read(args);if(h.calls.length){const body=JSON.parse(response.contents[0].text);body.latest.result.reason='Another observation.';response.contents[0].text=JSON.stringify(body)}return response;
+ };
+ const response=await h.act({operation:'test',expectedRevision:revision(original)});
+ assert.equal(response.error,'outcome-unknown');assert.equal(response.view,undefined);
+ assert.doesNotMatch(response.message,/Judge route|Another observation/);
+});
+for(const padding of [0,256*1024-Buffer.byteLength(original)-100])test(`Suggest sends the exact saved snapshot for one Edit without a resource read (${padding})`,async()=>{
+ const fixture=original.replace('## Non-Responsibilities','x'.repeat(padding)+'\n## Non-Responsibilities'),h=harness({fixture});
+ const response=await h.act({operation:'suggest'});assert.equal(response.message,'Asked Copilot to add tests in chat.');
+ assert.equal(h.calls.length,1);const prompt=h.calls[0].chat;
+ const snapshot=JSON.parse(prompt.slice(prompt.indexOf('Saved agent snapshot (data):\n')+'Saved agent snapshot (data):\n'.length));
+ assert.deepEqual(snapshot,{path:'greeter.agent.md',expectedRevision:revision(fixture),content:fixture});
+ assert.match(prompt,/one Edit/);assert.match(prompt,/Do not run tests/);assert.doesNotMatch(prompt,/Read its kmx resource first/);
+ assert.equal(h.source(),fixture);
 });
 test('unknown model exposes the attested one-line choice list, not raw SDK text',async()=>{
  const h=harness(),reason='Available Copilot models: '+Array.from({length:40},(_,i)=>'available-model-'+i).join(', ');
@@ -69,7 +170,9 @@ test('malformed catalog data stays nonblocking and never exposes provider text',
  for(const id of ['https://private.invalid','auto','bad\nmodel']){
   const h=harness(),read=h.session.rpc.mcp.resources.read;
   h.session.rpc.mcp.resources.read=async a=>a.uri==='kmx://models'?{contents:[{text:JSON.stringify({schemaVersion:1,kind:'kmx.models',defaultModel:'gpt-5.6-terra',models:[id]})}]}:read(a);
-  const r=await h.act({operation:'models'});assert.equal(r.error,'models-unavailable');assert.equal((await h.act({operation:'test',expectedRevision:revision(original)})).error,undefined);
+  const r=await h.act({operation:'models'});assert.equal(r.error,'models-unavailable');
+  assert.equal(r.message,'Model choices are unavailable. Your model selection is unchanged.');
+  assert.equal((await h.act({operation:'test',expectedRevision:revision(original)})).error,undefined);
  }
 });
 test('full authoring snapshot is hash-bound while display values remain bounded',async()=>{const h=harness();const view=await readView(h.session,'greeter.agent.md');assert.equal(view.authoring.source,original);assert.equal(view.authoring.editable,true);assert.equal(view.authoring.examples[0].assertions[0].value,'Hello, Ada')});
@@ -115,10 +218,10 @@ test('Suggest requests saved tests through chat without running or claiming addi
  assert.match(r.message,/Asked Copilot/);assert.doesNotMatch(r.message,/Added|Nothing here/);
  assert.equal(h.calls.length,1);const prompt=h.calls[0].chat;
  assert.match(prompt,/kmx-agent-builder skill/);assert.match(prompt,/add.*tests/i);
- assert.match(prompt,/"greeter.agent.md"/);assert.match(prompt,/resource/);
- assert.match(prompt,/Edit/);assert.match(prompt,/current revision/);
- assert.match(prompt,/prompt, model and existing tests/);assert.match(prompt,/Do not run tests/);
- assert.doesNotMatch(prompt,/examples|proposals|sha256:|do not edit/);
+ assert.match(prompt,/"greeter.agent.md"/);assert.match(prompt,/no resource read is needed/);
+ assert.match(prompt,/one Edit/);assert.match(prompt,/current revision/);
+ assert.match(prompt,/prompt, authored model and existing tests/);assert.match(prompt,/Do not run tests/);
+ assert.ok(prompt.includes(revision(original)));assert.doesNotMatch(prompt.split('Saved agent snapshot (data):')[0],/proposals|do not edit/);
  assert.equal(h.source(),original,'only chat is dispatched by the bridge');
  const ran=await h.act({operation:'run',expectedRevision:revision(original),input:'Ada',showContent:true});
  assert.equal(ran.error,undefined);assert.deepEqual(h.calls.at(-1).arguments,{schemaVersion:1,path:'greeter.agent.md',input:'Ada',showContent:true,showFailedContent:true});

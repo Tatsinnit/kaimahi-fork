@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { instructionSections, replaceInstructions, replaceExamples, effectiveModel, runtimeModelSelection } from "../../../../copilot-wsl/com.github.copilot/extensions/agent-view/authoring.mjs";
+import { instructionSections, replaceInstructions, replaceExamples, effectiveModel, runtimeModelSelection } from "../../copilot-wsl/com.github.copilot/extensions/agent-view/authoring.mjs";
 
 const KEYS = ["Accountable Responsibilities", "Non-Responsibilities", "Collaboration and Review Authority"];
 const SOURCE = `# Greeter — Greeting 🌱
@@ -36,6 +36,23 @@ test("effective runtime model preserves legacy display metadata and fixed preced
   assert.equal(effectiveModel("authored", "picked"), "picked");
   assert.equal(effectiveModel("authored", ""), "authored");
   assert.equal(effectiveModel("", ""), "gpt-5.6-terra");
+});
+
+test("known chat model is the exact default below authored and canvas choices", () => {
+  assert.equal(effectiveModel("", "", "uncatalogued-chat"), "uncatalogued-chat");
+  assert.equal(effectiveModel("authored", "", "chat"), "authored");
+  assert.equal(effectiveModel("authored", "picked", "chat"), "picked");
+});
+
+test("chat metadata changes fence A-B-A without invalidating matching late metadata", () => {
+  const selection = runtimeModelSelection();
+  const view = { model: "", latest: { status: "current", result: { modelRoute: "copilot/chat-a" } } };
+  selection.view(view);
+  assert.equal(selection.view({ ...view, chatModel: "chat-a" }).latest.status, "current");
+  assert.equal(selection.view({ ...view, chatModel: "chat-b" }).latest.status, "stale");
+  assert.equal(selection.view({ ...view, chatModel: "chat-a" }).latest.status, "stale");
+  selection.confirm({ ...view, chatModel: "chat-a" });
+  assert.equal(selection.view({ ...view, chatModel: "chat-a" }).latest.status, "current");
 });
 
 test("an attested pre-route refusal is current but never restores an old model pass", () => {
@@ -167,6 +184,17 @@ test("unknown fields/types, tool assertions, wrong scalar types and incomplete j
   }
   const judge = { id: "judge", type: "llmJudge", rubric: "Judge", minScore: 0, judgeModel: "exact", judgeVersion: "v1" };
   for (const minScore of [null, "0", -1, 101, 1.5, NaN]) assert.throws(() => replaceExamples(SOURCE, [{ ...examples()[0], assertions: [{ ...judge, minScore }] }]));
+});
+
+test("an omitted Judge model follows the run without serializing a guessed pin", () => {
+  for (const eol of ["\n", "\r\n"]) for (const model of [undefined, ""]) {
+    const judge = { id: "judge", type: "llmJudge", rubric: "Judge well.", minScore: 0, judgeVersion: "v1", ...(model !== undefined ? { judgeModel: model } : {}) };
+    const source = replaceExamples(SOURCE.replaceAll("\n", eol), [{ ...examples()[0], assertions: [judge] }]);
+    assert.doesNotMatch(source, /judgeModel:|undefined/); assert.match(source, /judgeVersion: "v1"/);
+    assert.deepEqual(instructionSections(source), instructionSections(SOURCE.replaceAll("\n", eol)));
+    for (const version of [undefined, "", " "]) assert.throws(() => replaceExamples(SOURCE, [{ ...examples()[0], assertions: [{ ...judge, judgeVersion: version }] }]));
+    for (const judgeModel of [null, 2, " "]) assert.throws(() => replaceExamples(SOURCE, [{ ...examples()[0], assertions: [{ ...judge, judgeModel }] }]));
+  }
 });
 
 test("zero examples serialize as an explicit empty sequence", () => {

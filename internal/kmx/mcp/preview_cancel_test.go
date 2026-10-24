@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -22,7 +21,7 @@ func TestPreviewCancellationRecoversFinishedTestsFromResource(t *testing.T) {
 	for _, operation := range []string{"run", "test"} {
 		for _, phase := range []string{"agent", "judge"} {
 			t.Run(operation+"/"+phase, func(t *testing.T) {
-				t.Setenv("KMX_HOME", filepath.Join(t.TempDir(), "state"))
+				t.Setenv("KMX_HOME", previewStateHome(t))
 				files, _, source := canonicalFiles(t)
 				source = strings.Replace(source, "**Preferred:** fake", "**Preferred:** unit", 1)
 				source = strings.Split(source, "## Examples")[0] + "## Examples\n```yaml\nexamples:\n"
@@ -103,8 +102,10 @@ func TestPreviewCancellationRecoversFinishedTestsFromResource(t *testing.T) {
 				}()
 				select {
 				case <-started:
+				case result := <-finished:
+					t.Fatalf("preview ended before the selected model request: sends=%d result=%+v", sends.Load(), result)
 				case <-time.After(5 * time.Second):
-					t.Fatal("second test did not reach the selected model request")
+					t.Fatalf("second test did not reach the selected model request: sends=%d", sends.Load())
 				}
 				cancel() // The SDK sends notifications/cancelled for this request.
 				select {
