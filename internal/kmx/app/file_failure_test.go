@@ -117,6 +117,56 @@ func TestFileFailureRetentionDoesNotChangeOutcome(t *testing.T) {
 	}
 }
 
+func TestFileFailureRetentionKeepsFailedMixedOutcome(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KMX_HOME", filepath.Join(base, "state"))
+	path := previewFile(t)
+	parsed, err := agentfile.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed.Examples[0].Assertions = append(parsed.Examples[0].Assertions, runtime.EvaluationAssertion{ID: "judge", Type: "llmJudge", Rubric: "grounded", MinScore: func() *int { n := 80; return &n }(), JudgeModel: "fake", JudgeVersion: "v1"})
+	runner := &scriptedPreview{verdict: runtime.EvaluationFail, mutate: func(out *agentpreview.Outcome) {
+		out.Examples[0].Assertions[1].Verdict = runtime.EvaluationUnknown
+	}}
+	opt := WithFilePreviewRetention(FilePreviewOptions{File: path, Operation: "test", CaseID: "first"}, path, parsed.Revision)
+	result, previewErr := (&App{FileRunner: runner}).PreviewAgentSnapshot(t.Context(), parsed, opt)
+	var status *FilePreviewError
+	if !errors.As(previewErr, &status) || status.ExitCode() != 2 || result.Verdict != runtime.EvaluationFail || result.Retention.Status != "retained" || len(result.Retention.Diagnostics) != 1 {
+		t.Fatalf("mixed outcome = %+v, %v", result, previewErr)
+	}
+	store, err := openFileFailureStore(path, false, retainedFileFailureCodec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, scanErr := store.scan()
+	closeErr := store.Close()
+	if scanErr != nil || closeErr != nil || len(entries) != 1 || entries[0].file == nil || entries[0].file.Detail.Verdict != "fail" {
+		t.Fatalf("mixed retained record = %+v, %v, %v", entries, scanErr, closeErr)
+	}
+}
+
+func TestFileFailureRetentionAllowsStateBelowStandaloneParent(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(base, "standalone.agent.md")
+	source, err := os.ReadFile(previewFile(t))
+	if err != nil || os.WriteFile(path, source, 0o600) != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KMX_HOME", filepath.Join(base, "state"))
+	result, previewErr := failingFilePreview(t, path)
+	var status *FilePreviewError
+	if !errors.As(previewErr, &status) || status.ExitCode() != 2 || result.Retention.Status != "retained" || len(result.Retention.Diagnostics) != 2 {
+		t.Fatalf("nested state retention = %+v, %v", result.Retention, previewErr)
+	}
+}
+
 func TestFileFailureRetentionRefusesUnsafeRouteIdentity(t *testing.T) {
 	base, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {

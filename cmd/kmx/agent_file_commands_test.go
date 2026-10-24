@@ -180,6 +180,7 @@ func TestFileCommandsCopilotFailures(t *testing.T) {
 }
 
 func TestFileCommandExitCodes(t *testing.T) {
+	t.Setenv("KMX_HOME", privateCommandHome(t))
 	for _, tc := range []struct {
 		verdict runtime.EvaluationVerdict
 		cause   error

@@ -510,6 +510,10 @@ func retainFilePreviewFailures(ctx context.Context, scope fileFailureScope, agen
 		if detail == nil {
 			continue
 		}
+		// File preview aggregation gives a known failed assertion precedence over
+		// an inconclusive sibling; keep that validated operation contract rather
+		// than applying workspace repeat-policy unknown precedence here.
+		detail.Verdict = string(verdict)
 		detail.OperationID = "op-" + operationID
 		assertions := make([]fileFailureAssertionRecord, len(outcome.Assertions))
 		for j, assertion := range outcome.Assertions {

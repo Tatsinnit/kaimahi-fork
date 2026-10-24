@@ -131,6 +131,7 @@ func previewCall(t *testing.T, cs *sdk.ClientSession, name string, args map[stri
 	return r, res
 }
 func TestPreviewFailureOnlyContentProjection(t *testing.T) {
+	t.Setenv("KMX_HOME", filepath.Join(t.TempDir(), "state"))
 	f, _, source := canonicalFiles(t)
 	source = strings.Split(source, "## Examples")[0] + "## Examples\n```yaml\nexamples:\n"
 	for _, id := range []string{"passing", "failing", "unknown"} {
@@ -184,6 +185,7 @@ func TestPreviewFailureOnlyContentProjection(t *testing.T) {
 }
 
 func TestPreviewCompletedFailureIsNormalResult(t *testing.T) {
+	t.Setenv("KMX_HOME", filepath.Join(t.TempDir(), "state"))
 	f, _, source := canonicalFiles(t)
 	saved, err := f.Create(t.Context(), "greeter.agent.md", []byte(source))
 	if err != nil {
@@ -209,6 +211,7 @@ func TestPreviewCompletedFailureIsNormalResult(t *testing.T) {
 }
 
 func TestPreviewToolsSharedResults(t *testing.T) {
+	t.Setenv("KMX_HOME", filepath.Join(t.TempDir(), "state"))
 	f, root, source := canonicalFiles(t)
 	saved, err := f.Create(t.Context(), "greeter.agent.md", []byte(source))
 	if err != nil {
@@ -296,6 +299,7 @@ func TestPreviewToolsSharedResults(t *testing.T) {
 	}
 }
 func TestPreviewSummaryBoundsAndContent(t *testing.T) {
+	t.Setenv("KMX_HOME", filepath.Join(t.TempDir(), "state"))
 	f, _, source := canonicalFiles(t)
 	// This test constructs a new fixture; native checkout bytes may use CRLF.
 	prefix, _, found := strings.Cut(strings.ReplaceAll(source, "\r\n", "\n"), "examples:\n")

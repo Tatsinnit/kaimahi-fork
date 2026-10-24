@@ -69,9 +69,6 @@ func openFileFailureStoreScope(scope fileFailureScope, create bool, codec retain
 		return nil, errSuiteFailureStore
 	}
 	base := filepath.Join(state, "eval-failures")
-	if suiteReceiptInside(base, filepath.Dir(scope.filename)) {
-		return nil, errSuiteFailureStore
-	}
 	return openFailureStore(base, scope.key, create, codec)
 }
 
