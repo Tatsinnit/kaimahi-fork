@@ -291,8 +291,14 @@ func TestFileFailureStoreInterruptedWriteAndScopedClear(t *testing.T) {
 		t.Fatalf("scan = %+v, %v, %v", entries, err, closeErr)
 	}
 	pending := filepath.Join(storePath, suiteFailurePendingName)
-	if err := os.WriteFile(pending, []byte(`{"partial`), 0o600); err != nil {
+	directory, err := fileaccess.OpenPrivateDirectory(t.Context(), storePath)
+	if err != nil {
 		t.Fatal(err)
+	}
+	publication, publishErr := fileaccess.PublishPrivate(t.Context(), directory, suiteFailurePendingName, []byte(`{"partial`))
+	closeErr := directory.Close()
+	if publishErr != nil || closeErr != nil || !publication.Visible || !publication.VisibilityKnown {
+		t.Fatalf("publish pending fixture = %+v, %v, close=%v", publication, publishErr, closeErr)
 	}
 	if n, err := clearFileFailures(t.Context(), path, result.Retention.Diagnostics[0].ID); err != nil || n != 1 {
 		t.Fatalf("targeted clear = %d, %v", n, err)
