@@ -30,7 +30,7 @@ func installPlatformGate(root *cobra.Command, state *commandState) {
 		if cmd != root {
 			args := cmd.Args
 			cmd.Args = func(cmd *cobra.Command, values []string) error {
-				if windowsHelpRequest(values) || windowsCommandAllowed(cmd, values) {
+				if windowsCommandAllowed(cmd, values) {
 					if args != nil {
 						return args(cmd, values)
 					}
@@ -52,15 +52,6 @@ func installPlatformGate(root *cobra.Command, state *commandState) {
 		}
 	}
 	wrap(root)
-}
-
-func windowsHelpRequest(args []string) bool {
-	for _, arg := range args {
-		if arg == "-h" || arg == "--help" {
-			return true
-		}
-	}
-	return false
 }
 
 func windowsCommandAllowed(cmd *cobra.Command, args []string) bool {

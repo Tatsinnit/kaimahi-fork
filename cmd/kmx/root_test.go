@@ -68,6 +68,7 @@ func TestHelpVersionCompletionDoNotLoadConfig(t *testing.T) {
 func TestGuardedWindowsDeferredOperationsRefuseBeforeEffects(t *testing.T) {
 	for _, args := range [][]string{
 		{"run", "--agent", "live", "--prompt", "hello"},
+		{"context", "use", "--", "--help"},
 		{"test"},
 		{"create", "greeter"},
 		{"suite", "validate", "missing"},

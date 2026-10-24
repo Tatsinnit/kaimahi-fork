@@ -183,11 +183,11 @@ func (s *suiteFailureStore) scan() ([]suiteFailureEntry, error) {
 	if pending != nil && pending.links == 2 {
 		matched := 0
 		for _, entry := range entries {
-			if entry.links != 2 {
-				continue
-			}
-			if entry.identity == pending.identity {
+			switch {
+			case entry.links == 2 && entry.identity == pending.identity:
 				matched++
+			case entry.links != 1:
+				return nil, errSuiteFailureStore
 			}
 		}
 		if matched != 1 {

@@ -223,6 +223,48 @@ func TestSuiteFailureStoreOwnPairVisibleUntilWholeClear(t *testing.T) {
 	}
 }
 
+func TestSuiteFailureStoreOwnPairRejectsAnotherHardLinkedRecord(t *testing.T) {
+	root, detail := failureStoreFixture(t)
+	first, err := saveSuiteFailure(t.Context(), root, detail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := saveSuiteFailure(t.Context(), root, detail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := openSuiteFailureStore(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := store.scan()
+	path := store.path
+	if closeErr := store.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil || len(entries) != 2 {
+		t.Fatal(entries, err)
+	}
+	byID := map[string]string{}
+	for _, entry := range entries {
+		byID[entry.record.Detail.ID] = entry.name
+	}
+	if err := os.Link(filepath.Join(path, byID[first]), filepath.Join(path, suiteFailurePendingName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(path, byID[second]), filepath.Join(t.TempDir(), "external")); err != nil {
+		t.Fatal(err)
+	}
+	store, err = openSuiteFailureStore(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.scan(); !errors.Is(err, errSuiteFailureStore) {
+		t.Fatalf("independent hard link accepted beside own pair: %v", err)
+	}
+}
+
 func TestSuiteFailureStoreCapacityWriteFailure(t *testing.T) {
 	root, d := failureStoreFixture(t)
 	var first string
