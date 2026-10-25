@@ -259,7 +259,7 @@ func TestFileFailureRetentionKeepsFrozenSubjectAfterParentReplacement(t *testing
 	}
 }
 
-func TestFileFailureRetentionRefusesScopeForMismatchedSnapshot(t *testing.T) {
+func TestFileFailureRetentionReportsMissingScopeOnlyForCompletedNonPass(t *testing.T) {
 	base, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -273,11 +273,34 @@ func TestFileFailureRetentionRefusesScopeForMismatchedSnapshot(t *testing.T) {
 	if err := os.WriteFile(path, append([]byte("\n"), []byte("not the parsed snapshot")...), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	opt := WithFilePreviewRetention(FilePreviewOptions{File: path, Operation: "test"}, path, parsed.Revision)
-	result, previewErr := (&App{FileRunner: &scriptedPreview{verdict: runtime.EvaluationFail}}).PreviewAgentSnapshot(t.Context(), parsed, opt)
-	var status *FilePreviewError
-	if !errors.As(previewErr, &status) || status.ExitCode() != 2 || result.Retention.Status != "unavailable" || len(result.Retention.Diagnostics) != 0 {
-		t.Fatalf("mismatched snapshot retention = %+v, %v", result.Retention, previewErr)
+	for _, tc := range []struct {
+		name      string
+		verdict   runtime.EvaluationVerdict
+		cause     error
+		retention string
+		exit      int
+	}{
+		{"pass", runtime.EvaluationPass, nil, "not_requested", 0},
+		{"fail", runtime.EvaluationFail, nil, "unavailable", 2},
+		{"cancel", runtime.EvaluationPass, context.Canceled, "not_requested", 130},
+		{"execution", runtime.EvaluationPass, errors.New("private execution error"), "not_requested", 1},
+		{"journal", runtime.EvaluationPass, agentpreview.ErrJournalFailed, "not_requested", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opt := WithFilePreviewRetention(FilePreviewOptions{File: path, Operation: "test"}, path, parsed.Revision)
+			result, previewErr := (&App{FileRunner: &scriptedPreview{verdict: tc.verdict, err: tc.cause}}).PreviewAgentSnapshot(t.Context(), parsed, opt)
+			exit := 0
+			if previewErr != nil {
+				var status *FilePreviewError
+				if !errors.As(previewErr, &status) {
+					t.Fatalf("unexpected error type: %v", previewErr)
+				}
+				exit = status.ExitCode()
+			}
+			if exit != tc.exit || result.Retention.Status != tc.retention || len(result.Retention.Diagnostics) != 0 {
+				t.Fatalf("mismatched snapshot retention = %+v, %v", result.Retention, previewErr)
+			}
+		})
 	}
 }
 

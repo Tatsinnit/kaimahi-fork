@@ -328,9 +328,7 @@ func (a *App) previewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent,
 	if a.FileRunner == nil {
 		return fail("runner_unavailable", 1)
 	}
-	if opt.RetentionFile != "" && opt.retentionScope == nil {
-		r.Retention.Status = "unavailable"
-	} else if opt.retentionScope != nil && opt.retentionScope.filename != opt.RetentionFile {
+	if opt.retentionScope != nil && opt.retentionScope.filename != opt.RetentionFile {
 		return fail("invalid_options", 1)
 	}
 	request := agentpreview.Request{Agent: parsed, Examples: selected, Route: route, JudgeRoute: opt.JudgeRoute, Input: opt.Input, Progress: opt.Progress, ToolBindings: opt.ToolBindings, FileLabel: r.File.Path}
@@ -463,6 +461,8 @@ func (a *App) previewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent,
 	}
 	if opt.Operation == "test" && opt.retentionScope != nil {
 		retainFilePreviewFailures(ctx, *opt.retentionScope, parsed, selected, route, judge, r.Selection.Scope, outcome.Examples, &r)
+	} else if opt.Operation == "test" && opt.RetentionFile != "" && runtime.EvaluationAssertionsVerdict(all) != runtime.EvaluationPass {
+		r.Retention.Status = "unavailable"
 	}
 	r.State = "complete"
 	if len(selected) == 0 {
