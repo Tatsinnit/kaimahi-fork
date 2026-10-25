@@ -403,25 +403,29 @@ func marshalSuiteFailureRecord(r suiteFailureRecord, keys []string) ([]byte, err
 	}
 	r.Detail.Assertions = append([]suiteFailureAssertion(nil), r.Detail.Assertions...)
 	encode := func() []byte { raw, _ := json.Marshal(r); return raw }
+	return marshalFailureDetail(&r.Detail, encode, keys)
+}
+
+func marshalFailureDetail(detail *suiteFailureDetail, encode func() []byte, keys []string) ([]byte, error) {
 	raw := encode()
 	if len(raw) > maxSuiteFailureRecordBytes {
-		r.Detail.ContentTruncated = true
-		r.Detail.Answer = ""
-		r.Detail.AnswerStatus = "omitted"
+		detail.ContentTruncated = true
+		detail.Answer = ""
+		detail.AnswerStatus = "omitted"
 		raw = encode()
 		// Keep the longest content prefix at each priority. Binary search avoids
 		// repeatedly serializing megabytes once per assertion under hostile input.
 		for phase := 0; phase < 3 && len(raw) > maxSuiteFailureRecordBytes; phase++ {
-			original := append([]suiteFailureAssertion(nil), r.Detail.Assertions...)
+			original := append([]suiteFailureAssertion(nil), detail.Assertions...)
 			apply := func(keep int) {
-				r.Detail.Assertions = append([]suiteFailureAssertion(nil), original...)
+				detail.Assertions = append([]suiteFailureAssertion(nil), original...)
 				if phase == 2 {
-					r.Detail.OmittedAssertions += len(original) - keep
-					r.Detail.Assertions = r.Detail.Assertions[:keep]
+					detail.OmittedAssertions += len(original) - keep
+					detail.Assertions = detail.Assertions[:keep]
 					return
 				}
 				for i := keep; i < len(original); i++ {
-					a := &r.Detail.Assertions[i]
+					a := &detail.Assertions[i]
 					if phase == 0 {
 						a.Excerpt, a.ExcerptKind = "", ""
 					} else {
@@ -430,11 +434,11 @@ func marshalSuiteFailureRecord(r suiteFailureRecord, keys []string) ([]byte, err
 					}
 				}
 			}
-			previousOmitted := r.Detail.OmittedAssertions
+			previousOmitted := detail.OmittedAssertions
 			lo, hi := 0, len(original)
 			for lo < hi {
 				mid := (lo + hi + 1) / 2
-				r.Detail.OmittedAssertions = previousOmitted
+				detail.OmittedAssertions = previousOmitted
 				apply(mid)
 				if len(encode()) <= maxSuiteFailureRecordBytes {
 					lo = mid
@@ -442,7 +446,7 @@ func marshalSuiteFailureRecord(r suiteFailureRecord, keys []string) ([]byte, err
 					hi = mid - 1
 				}
 			}
-			r.Detail.OmittedAssertions = previousOmitted
+			detail.OmittedAssertions = previousOmitted
 			apply(lo)
 			raw = encode()
 		}
@@ -465,57 +469,7 @@ func marshalFileFailureRecord(r fileFailureRecord, keys []string) ([]byte, error
 	r.Assertions = append([]fileFailureAssertionRecord(nil), r.Assertions...)
 	r.Detail.Assertions = append([]suiteFailureAssertion(nil), r.Detail.Assertions...)
 	encode := func() []byte { raw, _ := json.Marshal(r); return raw }
-	raw := encode()
-	if len(raw) > maxSuiteFailureRecordBytes {
-		r.Detail.ContentTruncated = true
-		r.Detail.Answer = ""
-		r.Detail.AnswerStatus = "omitted"
-		raw = encode()
-		for phase := 0; phase < 3 && len(raw) > maxSuiteFailureRecordBytes; phase++ {
-			original := append([]suiteFailureAssertion(nil), r.Detail.Assertions...)
-			apply := func(keep int) {
-				r.Detail.Assertions = append([]suiteFailureAssertion(nil), original...)
-				if phase == 2 {
-					r.Detail.OmittedAssertions += len(original) - keep
-					r.Detail.Assertions = r.Detail.Assertions[:keep]
-					return
-				}
-				for i := keep; i < len(original); i++ {
-					a := &r.Detail.Assertions[i]
-					if phase == 0 {
-						a.Excerpt, a.ExcerptKind = "", ""
-					} else {
-						a.Reasons = nil
-						a.Expected = ""
-					}
-				}
-			}
-			previousOmitted := r.Detail.OmittedAssertions
-			lo, hi := 0, len(original)
-			for lo < hi {
-				mid := (lo + hi + 1) / 2
-				r.Detail.OmittedAssertions = previousOmitted
-				apply(mid)
-				if len(encode()) <= maxSuiteFailureRecordBytes {
-					lo = mid
-				} else {
-					hi = mid - 1
-				}
-			}
-			r.Detail.OmittedAssertions = previousOmitted
-			apply(lo)
-			raw = encode()
-		}
-	}
-	if len(raw) > maxSuiteFailureRecordBytes || secretshapes.Match(string(raw)) != nil {
-		return nil, errSuiteFailureStore
-	}
-	for _, key := range keys {
-		if key != "" && strings.Contains(string(raw), key) {
-			return nil, errSuiteFailureStore
-		}
-	}
-	return raw, nil
+	return marshalFailureDetail(&r.Detail, encode, keys)
 }
 
 func (s *suiteFailureStore) remove(entry suiteFailureEntry) error {
