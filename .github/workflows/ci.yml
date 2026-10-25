@@ -127,10 +127,8 @@ jobs:
           go vet ./internal/kmx/fileaccess ./internal/kmx/config ./internal/kmx/localpreview ./internal/kmx/app ./scripts/ci/windows-tests
           exit $LASTEXITCODE
 
-  hygiene:
+  hygiene-checks:
     runs-on: ubuntu-latest
-    needs: [app-tests, windows-day-zero-foundation]
-    if: always()
     steps:
       - uses: actions/checkout@v4
         with:
@@ -250,20 +248,12 @@ jobs:
           python3 scripts/test_orka_runtime_fixture.py
           python3 scripts/test_app_tests.py
           python3 scripts/test_bundle_retirement_ci.py
-      - name: kagent bootstrap, qualification and deterministic fixture self-tests
+      - name: Native suite fixtures, timing and reference self-tests
         run: |
-          python3 scripts/test_kagent_lift.py
-          python3 scripts/test_kagent_lift_shell.py
-          python3 scripts/test_kagent_lift_fixture.py
-          python3 scripts/test_kagent_lift_qualification.py
-          python3 scripts/test_kagent_lift_audit.py
-          python3 scripts/test_kagent_lift_qualify.py
-          python3 scripts/test_kagent_lift_ci.py
           python3 scripts/test_suite_native.py
           python3 scripts/test_native_timings.py
           python3 scripts/test_suite_native_lift.py
           python3 scripts/test_orka_native_reference.py
-          python3 scripts/test_suite_kagent.py
       - name: Orka qualification and dependency boundaries
         run: |
           python3 scripts/test_orka_routing.py
@@ -785,15 +775,12 @@ jobs:
           print(f"{total} cluster steps across {len(shards)} shards + kmx-clone-free: all guarded")
           print(f"{required} reports for: {', '.join(shards)}; kmx-clone-free has no checkout")
           EOF
-      # kmx's own module. It lives in the REQUIRED hygiene job rather
-      # than a job of its own, because the guard port, the scaffolder's
+      # kmx's own module. These checks feed the REQUIRED hygiene gate,
+      # because the guard port, the scaffolder's
       # refusals and the checksum verification are the parts of kmx that
       # decide whether someone's cluster gets written to or a credential
       # gets committed — they gate merges or they are decoration. Keyless
       # and clusterless: every one of these tests runs on fixtures.
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
       - name: Comment-history tripwire self-test
         run: python3 scripts/check-comment-history.py --selftest
       - name: Source comments describe current behavior
@@ -979,8 +966,13 @@ jobs:
           grep -q -- '--- PASS: TestChatRefusesTheRetiredKagentRuntimeWithoutReachingACluster' retirement.out
           grep -q -- '--- PASS: TestLegacyAgentEditIsRemovedBeforeConfiguration' retirement.out
           ! grep -q -- '--- SKIP:' retirement.out
-      # Preserve the required check's name and collect other hygiene diagnostics
-      # even if a dependency fails. Missing, skipped and cancelled work refuses.
+  # Run checks alongside native tests; keep the required name fail-closed.
+  # Missing, skipped, cancelled or failed work must never produce a green gate.
+  hygiene:
+    runs-on: ubuntu-latest
+    needs: [hygiene-checks, app-tests, windows-day-zero-foundation]
+    if: always()
+    steps:
       - name: Every required hygiene dependency succeeded
         if: always()
         env:
@@ -989,7 +981,7 @@ jobs:
           python3 - <<'EOF'
           import json, os, sys
           needs = json.loads(os.environ["SHARDS"])
-          expected = {"app-tests", "windows-day-zero-foundation"}
+          expected = {"hygiene-checks", "app-tests", "windows-day-zero-foundation"}
           if set(needs) != expected:
               print("missing or unexpected hygiene dependency — refusing success"); sys.exit(1)
           bad = {}

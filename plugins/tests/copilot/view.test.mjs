@@ -361,7 +361,12 @@ test("bridge serves only token-protected same-host requests", async () => {
     assert.equal(page.headers["x-content-type-options"], "nosniff");
     assert.equal(page.headers["cache-control"], "no-store");
     assert.equal(page.headers["access-control-allow-origin"], undefined);
-    assert.equal((await get(base + "app.js")).headers["content-type"].split(";")[0], "text/javascript");
+    for (const name of ["app.js", "authoring.mjs", "editor.mjs", "draft-controller.mjs", "action-controller.mjs", "observation-controller.mjs"]) {
+      const asset = await get(base + name);
+      assert.equal(asset.status, 200, name);
+      assert.equal(asset.headers["content-type"].split(";")[0], "text/javascript", name);
+      assert.ok(asset.body.length > 0, name);
+    }
     assert.equal((await get(base + "style.css")).headers["content-type"].split(";")[0], "text/css");
 
     const data = await get(base + "view.json");
@@ -1360,10 +1365,10 @@ test("UI hides a minimal prelude Purpose once while keeping three primary paragr
 });
 
 test("frontend and provider sources avoid unsafe sinks and mutation surfaces", async () => {
-  const [controller, html, css, ext, view, editor] = await Promise.all(
-    ["app.js", "index.html", "style.css", "extension.mjs", "view.mjs", "editor.mjs"].map((f) => readFile(here(f), "utf8")),
+  const [controller, html, css, ext, view, editor, authoring, ...controllers] = await Promise.all(
+    ["app.js", "index.html", "style.css", "extension.mjs", "view.mjs", "editor.mjs", "authoring.mjs", "draft-controller.mjs", "action-controller.mjs", "observation-controller.mjs"].map((f) => readFile(here(f), "utf8")),
   );
-  const app = controller + "\n" + editor;
+  const app = [controller, editor, authoring, ...controllers].join("\n");
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   for (const bad of [/innerHTML/, /outerHTML/, /insertAdjacentHTML/, /document\.write/, /\beval\s*\(/, /new Function/, /dangerouslySet/, /marked|markdown/i, /\bXMLHttpRequest\b/, /WebSocket/, /localStorage/, /<form|<button|<input|<textarea/i]) {
     assert.doesNotMatch(strip(app), bad, String(bad));
@@ -1425,6 +1430,43 @@ async function editableCanvas(body, eol, options = {}) {
   };
   return { doc, root, calls, source, view, app, examples, sections: instructionSections(source), clickTest };
 }
+
+test("stale_revision checks the supplied view and retains the draft as a conflict without resubmitting", async t => {
+  let h;
+  h = await editableCanvas("Before.", undefined, {
+    response: { error: "stale_revision" },
+    fetchView: () => viewFor(replaceInstructions(h.source, [{ key: h.sections[0].key, text: "Outside." }]), h.examples),
+  });
+  t.after(() => h.app.dispose());
+  c18Prompt(h.root).textContent = "My draft."; c18Prompt(h.root).listeners.input[0]();
+  await h.clickTest(); await new Promise(setImmediate);
+  assert.equal(c18Prompt(h.root).textContent, "My draft.");
+  assert.ok(btn(h.root, "Keep my edits"));
+  assert.equal(byClass(h.root, "save-run")[0].disabled, true);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].operation, "save-and-test");
+});
+
+test("dispose fences an earlier observation and cancels Undo expiry without refresh or new sends", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let h;
+  h = await editableCanvas("Before.", undefined, { respond: async action => ({
+    saved: true, view: await viewFor(replaceInstructions(h.source, action.sections), h.examples, { status: "stale" }),
+  }) });
+  c18Prompt(h.root).textContent = "Saved."; c18Prompt(h.root).listeners.input[0]();
+  await h.clickTest(); await new Promise(setImmediate);
+  const undo = byClass(h.root, "prompt-undo")[0], content = h.root.children[0];
+  assert.equal(undo.hidden, false);
+  const started = h.app.observation();
+  const late = viewFor(replaceInstructions(h.source, [{ key: h.sections[0].key, text: "Outside." }]), h.examples);
+  h.app.dispose();
+  assert.equal(h.app.observe(await late, started), false);
+  t.mock.timers.tick(10000);
+  assert.equal(h.root.children[0], content);
+  assert.equal(c18Prompt(h.root).textContent, "Saved.");
+  assert.equal(undo.hidden, false, "a canceled expiry must not refresh the retained DOM");
+  assert.equal(h.calls.length, 1);
+});
 
 test("prompt Undo immediately saves previous instructions and never reruns", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -1934,6 +1976,36 @@ test("Shift+Enter and native insertLineBreak insert one literal LF; composition 
   editor.listeners.keydown[0]({key:"Enter",preventDefault(){prevented++}});
   editor.listeners.keydown[0]({key:"Enter",preventDefault(){prevented++}}); await tick();
   assert.equal(h.calls.length,1); assert.equal(h.calls[0].sections[0].text,"First sentence.\n\n<plain>\ntext");
+});
+
+test("instruction handlers read live busy and blocked state before inserting or reading transfers", async t => {
+  let finish;
+  const h = await editableCanvas("Original.", undefined, { respond: () => new Promise(resolve => { finish = resolve; }) });
+  t.after(() => h.app.dispose());
+  const editor = c18Prompt(h.root);
+  await h.clickTest();
+  const locked = () => {
+    const prevented = [];
+    editor.listeners.keydown[0]({ key: "Enter", preventDefault() { prevented.push("Enter"); } });
+    editor.listeners.keydown[0]({ key: "Enter", shiftKey: true, preventDefault() { prevented.push("Shift+Enter"); } });
+    editor.listeners.beforeinput[0]({ inputType: "insertLineBreak", cancelable: true, preventDefault() { prevented.push("beforeinput"); } });
+    for (const kind of ["paste", "drop"]) {
+      const event = { preventDefault() { prevented.push(kind); } };
+      Object.defineProperty(event, kind === "paste" ? "clipboardData" : "dataTransfer", { get() { assert.fail("locked handlers must not read transfers"); } });
+      editor.listeners[kind][0](event);
+    }
+    assert.deepEqual(prevented, ["Enter", "Shift+Enter", "beforeinput", "paste", "drop"]);
+    assert.equal(editorValue(editor), "Original.");
+    assert.equal(h.calls.length, 1);
+    assert.equal(c18Prompt(h.root).attrs.contenteditable, "false");
+    assert.equal(c18Prompt(h.root).attrs["aria-readonly"], "true");
+  };
+  locked();
+  finish({ error: "outcome-unknown", message: "Outcome not confirmed." });
+  await tick();
+  assert.equal(h.root.attrs["aria-busy"], "false");
+  assert.equal(h.app.idle(), false);
+  locked(); // Retained handlers must now see blocked, not the old busy value.
 });
 
 test("successful main runs keep the saved Enter instruction; observed time belongs only to Tests", async () => {
@@ -3243,8 +3315,10 @@ test("unsupported editor DOM is retained against observation and navigation unti
 });
 
 test("frontend never relies on array methods of live DOM collections", async () => {
-  const app = await readFile(here("app.js"), "utf8");
-  assert.doesNotMatch(app, /\.(?:children|childNodes)\??\.(?:map|filter|find|some|every|forEach|flatMap|reduce)\(/);
+  for (const name of ["app.js", "editor.mjs", "authoring.mjs", "draft-controller.mjs", "action-controller.mjs", "observation-controller.mjs"]) {
+    const app = await readFile(here(name), "utf8");
+    assert.doesNotMatch(app, /\.(?:children|childNodes)\??\.(?:map|filter|find|some|every|forEach|flatMap|reduce)\(/, name);
+  }
 });
 
 test("ADVERSARIAL detail edit immediately greys a passing check without navigation", async () => {
