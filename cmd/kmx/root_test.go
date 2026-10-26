@@ -180,6 +180,7 @@ func TestGuardedWindowsFileCommandsRefuseEveryExternalRouteBeforeEffects(t *test
 		{"test provider", []string{"test", file, "--provider", "copilot"}},
 		{"test endpoint", []string{"test", file, "--endpoint", "https://example.invalid"}},
 		{"test tool bindings", []string{"test", file, "--tool-bindings", "bindings.json"}},
+		{"test GitHub summary", []string{"test", file, "--output", "json", "--github-summary"}},
 		{"test workspace", []string{"test", file, "--workspace", filepath.Dir(file)}},
 		{"test destination", []string{"test", file, "--to", "remote"}},
 		{"test inference", []string{"test", file, "--inference", "provider:live"}},
@@ -200,6 +201,8 @@ func TestGuardedWindowsFileCommandsRefuseEveryExternalRouteBeforeEffects(t *test
 			deps.fileRunner = runner
 			home := filepath.Join(t.TempDir(), "state-must-not-exist")
 			t.Setenv("KMX_HOME", home)
+			summary := filepath.Join(t.TempDir(), "summary-must-not-exist.md")
+			t.Setenv("GITHUB_STEP_SUMMARY", summary)
 			err := execute(tc.args, deps)
 			if !errors.Is(err, errWindowsOperationUnsupported) {
 				t.Fatalf("%v = %v", tc.args, err)
@@ -209,6 +212,9 @@ func TestGuardedWindowsFileCommandsRefuseEveryExternalRouteBeforeEffects(t *test
 			}
 			if _, statErr := os.Lstat(home); !errors.Is(statErr, os.ErrNotExist) {
 				t.Fatalf("%v created state: %v", tc.args, statErr)
+			}
+			if _, statErr := os.Lstat(summary); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("%v created a GitHub summary: %v", tc.args, statErr)
 			}
 		})
 	}
@@ -244,6 +250,39 @@ func TestGuardedWindowsFileSnapshotCannotChangeRouteAfterAdmission(t *testing.T)
 	}
 	if _, statErr := os.Lstat(home); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("changed route created state: %v", statErr)
+	}
+
+	var summaryOut, summaryErrOut bytes.Buffer
+	summaryDeps, summaryLoads := testDependencies(&summaryOut, &summaryErrOut)
+	summaryDeps.goos = "windows"
+	summaryRunner := &cliPreviewFake{verdict: runtime.EvaluationPass}
+	summaryDeps.fileRunner = summaryRunner
+	summaryHome := filepath.Join(t.TempDir(), "state-must-not-exist")
+	summary := filepath.Join(t.TempDir(), "summary-must-not-exist.md")
+	t.Setenv("KMX_HOME", summaryHome)
+	t.Setenv("GITHUB_STEP_SUMMARY", summary)
+	summaryFile := cliPreviewFile(t)
+	root = newRootCommand(&commandState{deps: summaryDeps, argv: []string{"test", summaryFile, "--output", "json"}})
+	testCommand, _, err := root.Find([]string{"test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testCommand.PreRunE = func(cmd *cobra.Command, _ []string) error {
+		return cmd.Flags().Set("github-summary", "true")
+	}
+	root.SetArgs([]string{"test", summaryFile, "--output", "json"})
+	err = root.Execute()
+	if !errors.Is(err, errWindowsOperationUnsupported) {
+		t.Fatalf("changed summary mode = %v", err)
+	}
+	if *summaryLoads != 0 || summaryRunner.calls != 0 || summaryOut.Len() != 0 || summaryErrOut.Len() != 0 {
+		t.Fatalf("changed summary mode had effects: loads=%d sends=%d stdout=%q stderr=%q", *summaryLoads, summaryRunner.calls, summaryOut.String(), summaryErrOut.String())
+	}
+	if _, statErr := os.Lstat(summaryHome); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("changed summary mode created state: %v", statErr)
+	}
+	if _, statErr := os.Lstat(summary); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("changed summary mode created a GitHub summary: %v", statErr)
 	}
 }
 
@@ -368,7 +407,7 @@ func TestGuardedWindowsSupportedCommandFlagsAreExhaustivelyAllowlisted(t *testin
 		allowFlags []string
 	}{
 		{[]string{"run"}, []string{file}, []string{"agent", "case", "container-engine", "context", "endpoint", "namespace", "output", "prompt", "prompt-file", "provider", "result-port", "show-content", "tool-bindings", "verbose", "wait"}, []string{"case", "output", "prompt", "show-content", "verbose"}},
-		{[]string{"test"}, []string{file}, []string{"bindings", "case", "case-timeout", "container-engine", "context", "development-host", "endpoint", "inference", "judge-base-url", "judge-key-env", "out", "output", "provider", "result-port", "show-content", "to", "to-context", "to-namespace", "tool-bindings", "verbose", "workspace"}, []string{"case", "output", "show-content", "verbose"}},
+		{[]string{"test"}, []string{file}, []string{"bindings", "case", "case-timeout", "container-engine", "context", "development-host", "endpoint", "github-summary", "inference", "judge-base-url", "judge-key-env", "out", "output", "provider", "result-port", "show-content", "to", "to-context", "to-namespace", "tool-bindings", "verbose", "workspace"}, []string{"case", "output", "show-content", "verbose"}},
 		{[]string{"test", "explain"}, nil, []string{"clear", "container-engine", "context", "file", "show-content", "workspace"}, []string{"clear", "file", "show-content"}},
 		{[]string{"eval", "explain"}, nil, []string{"clear", "container-engine", "context", "file", "show-content", "workspace"}, []string{"clear", "file", "show-content"}},
 	}
@@ -793,7 +832,7 @@ func TestTheCommandTreeIsExactlyWhatIsListedHere(t *testing.T) {
 		"context", "context show", "context use", "ctx", "local", "local up", "local down", "mcp", "model", "model list", "model login", "model logout",
 		"orka", "orka install", "orka status", "orka show", "orka list",
 		"quickstart", "quickstart-wizard", "run-profile", "run-profile export",
-		"status", "suite", "suite build", "suite policy", "suite pull", "suite push", "suite validate", "console", "targets", "task", "task result",
+		"status", "suite", "suite build", "suite policy", "suite pull", "suite push", "suite push-image", "suite validate", "console", "targets", "task", "task result",
 		"version",
 	}
 	sort.Strings(want)

@@ -35,7 +35,8 @@ For example, after downloading a qualified amd64 artifact:
 
 The file must satisfy the [single-file agent contract](agent-file.md), and the
 supported native execution route is the deterministic `fake` model. Provider,
-endpoint, tool-binding and prompt-file routes are outside this boundary.
+endpoint, tool-binding, prompt-file and `--github-summary` modes are outside this
+boundary.
 Run/Test create private local-preview state as described below, but they do not
 create AgentSuite evidence, a passing suite receipt, publication authority or
 deployment authority. Offline Explain reads or clears only the selected file's

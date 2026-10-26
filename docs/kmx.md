@@ -196,7 +196,8 @@ Bound tools support Copilot Chat Completions and Responses routes; judging stays
 tool-free. Unbound tools still refuse with one plain reason. Trusted embedding
 can bind multiple declared tool names. The Copilot extension runtime also binds
 names to the joined session's actual MCP tools without a binding file; see
-[Copilot host tools](local-preview.md#copilot-host-tools). No Tools editor UI is added.
+[Copilot host tools](local-preview.md#copilot-host-tools). The canvas edits tool
+declarations and [folder test settings](#folder-tool-settings) separately.
 The opt-in hosted smoke uses a scripted model, not real-LLM qualification.
 
 File mode uses embedded Sessions for fake/local and explicit Copilot routes,
@@ -312,7 +313,10 @@ Strict workspace assertions and exported run profiles still require a model pin.
 Output defaults to text; `-o json` returns one versioned `schemaVersion: 1`,
 `kind: kmx.agent-file-preview` document. Both preserve operation, exact source-byte
 SHA-256 revision, provider/model, full/subset selection, terminal state and
-example/assertion IDs with pass/fail/unknown and safe reasons. JSON includes
+example/assertion IDs with pass/fail/unknown and safe reasons. It also includes
+monotonic `durationMs` for the whole invocation and each completed test, effective
+judge identity when judging ran, frozen tool Enabled/Disabled settings and each
+test's live/recorded/unavailable source plus call count. JSON includes
 `fullPass`, which is false for every subset, incomplete or unknown result.
 Fake/local and Copilot execution retain a private journal handle internally,
 never in this safe result. A journaled preview pass is not deploy evidence. Paths
@@ -321,6 +325,19 @@ are sanitized display basenames, not a file-targeting API. The optional structur
 Default output contains no instructions, inputs, answers, operands, provider error
 text, endpoint or journal handle. `--show-content` explicitly adds sanitized answer
 excerpts, at most 4096 UTF-8 bytes each; treat them as untrusted content.
+
+`kmx test FILE -o json --github-summary` writes the JSON report to stdout and
+appends a bounded Markdown rendering of that same safe result to the file named by
+GitHub Actions' existing `$GITHUB_STEP_SUMMARY`. It omits file paths, prompts,
+answers, assertion operands, tool arguments/results, credentials, endpoints,
+provider diagnostics, retained diagnostic IDs and judge rationale. The flag is
+Test-file-only, requires JSON output, and creates no local history beyond an
+explicit recording capture requested by the test. An unset, relative, linked or
+non-regular summary path is refused before model execution; a missing file at a
+valid absolute path is created with mode 0600.
+A summary-write failure exits 1. Otherwise the command retains the normal
+0/2/1/130 exit status. Reports and summaries are local-preview diagnostics only,
+not suite evidence or Publish/Deploy authority.
 
 File-mode exits: 0 means the selected checks completed and passed (a partial
 selection is **not** a full pass); 2 means completed assertion fail/unknown;
@@ -436,9 +453,17 @@ bytes/absence untouched. Changes retain other keys/comments and existing mode bi
 or stale config refuses without a write; the writer refuses multiply-linked files
 and folders the settings reader cannot use. Missing Enabled no-ops remain portable.
 Any unconfirmed publication reports `state: unknown`, `mayHaveWritten: true`,
-`reasonCode: settings_write_unknown`, without an invented revision/vector/changed
-value. This is conservative, not a claim a write likely occurred. Read back before
-deciding what to do; never retry automatically or assume agent/config atomicity.
+`reasonCode: settings_write_unknown`, without an invented settings revision/vector
+or changed value; the checked agent's `file` identity is not settings evidence.
+This is conservative, not a claim a write likely occurred. Read back before deciding
+what to do; never retry automatically or assume agent/config atomicity.
+
+With a matching current-source plugin and binary, a ticked tool's quiet
+Enabled/Disabled word in the canvas flips a draft. Enter saves declarations first,
+then serial folder settings, with checked readback before testing. The Tools section
+shows saved per-server disabled counts; the tool page shows draft counts. Esc discards Tools
+edits, not unrelated prompt/test drafts. Partial saves disclose earlier effects and
+stop before Test; unknown outcomes require deliberate Reload, not resubmission.
 
 #### Optional native Squad chat flow
 
@@ -1068,8 +1093,8 @@ platform-specific, digest-pinned OCI manifests. The example targets an Azure
 OpenAI deployment named `gpt-5-mini` through the OpenAI-compatible v1 endpoint.
 The build records only the environment variable name `AZURE_OPENAI_API_KEY`; it
 never reads or embeds the key. `--model-api-key-env` accepts only names matching
-`[A-Za-z_][A-Za-z0-9_]*`; invalid names are rejected before any build files are
-written. Supply the key in that environment variable when running or deploying
+`[A-Za-z_][A-Za-z0-9_]*`; invalid names and known credential-shaped values are
+rejected before source reads or build files are written. Supply the key in that environment variable when running or deploying
 the resulting image.
 
 The command validates the suite, resolves one immutable sandbox build plan and
@@ -1099,6 +1124,63 @@ image must therefore currently be a complete AgentKit adapter image from the
 `pydantic-ai` runtime; other harness repositories are refused. A future
 conformant AgentKit adapter or another builder can replace it without changing
 AgentSuite resolution.
+
+#### Experimental image contracts and publication
+
+`suite build --suite-ref <registry/repository@sha256:...>` compares every local
+packaged file, entry type, mode and link target with a bounded, digest-verified published
+snapshot, including cases and supplemental metadata, then builds from the fetched
+content. Loose directories use the shared portable packing policy: undeclared
+files default to non-executable, and ToolProvider inventory owns declared modes,
+independently of host execute bits. Published executable permissions are preserved;
+group/world write bits are masked
+when materializing build sources. Modes without owner file-read or directory
+read/search permissions (including `0000`) refuse before creating the staging
+directory; declared mode identity is never rewritten. Capability-based agents omit model build flags:
+selected inference is supplied through the `agentkit-v0-mounted-v1` configuration
+ABI. Mounted builds currently support only `linux/amd64`: their qualified harness
+digest names a single amd64 manifest. Other mounted platforms refuse before export.
+The AgentKit adapter supports only port 8080 and `/healthz`, and refuses
+unsupported serving declarations before building.
+The shared `localartifact` loader retains accepted confined symlink/hardlink
+semantics as well as files/directories; build materialization does not restore a
+separate registry parser. Mounted builds require declared non-secret
+`AGENTKIT_BIND` and secret `AGENTKIT_AUTH_TOKEN` inputs. Exact-model declarations
+must include the selected `--model-api-key-env` as a secret input. Unsupported
+input environments refuse before export rather than becoming misleading labels.
+
+`suite push-image <archive> <reference> [--platform linux/amd64] [--force]`
+publishes the complete verified OCI image graph, including flat or nested
+attestation layouts, and prints the runnable platform digest. Ordinary build
+output needs no deployment label to be published. Deployment consumers separately
+validate declarations. A different existing tag refuses unless `--force` is
+explicit; same-digest publication is a no-op. The existing non-atomic tag preflight
+and registry authentication policy below apply. `--platform` requires nonempty
+`os/architecture` components with exactly one slash; malformed values refuse
+before archive reads.
+OCI index/manifest `subject` links are unsupported and refuse during inspection
+before registry requests, including subject links on attestation manifests.
+This does not affect in-toto statement subjects. Image resolution traverses nested
+indexes with a global descriptor/depth budget and refuses ambiguous platform matches.
+Image manifest/index transport uses the inspector's 4-MiB metadata budget;
+suite provenance/referrer operations retain their separate 1-MiB budget.
+
+Image declarations bind the full suite OCI manifest digest (including cases and
+metadata), composition and exact build-profile digests, without embedding the
+source registry location. The public `http-v1` serving interface is target-neutral.
+`SandboxPlan.SuiteManifestHash` names the public root JSON identity; the materializing
+caller supplies the distinct full OCI source digest. The internal primitives sit
+beneath experimental `AgentSuites.Validate → Build → Push`, but do not implement
+the alpha `pkg/kmx.AgentSuites` service or a conformant sandbox binding.
+The KMX-owned image-declaration schema is checkout-only and self-contained, with
+explicit required/null and mounted-inference rules. Cross-field semantic checks
+(capacity comparison, input-key uniqueness and digest agreement) still require
+the Go validator, as documented in the schema.
+Full image inventory/base composition, image Deploy, evaluation and TUI workflows
+are separate work tracked under [#571](https://github.com/kaimahi-agents/kaimahi/issues/571),
+including the image-set association decisions from #356 and materialization
+handoff from #345. These commands do not add image execution to native workspace,
+flow or AgentSessions deployment paths.
 
 #### Registry authentication
 
