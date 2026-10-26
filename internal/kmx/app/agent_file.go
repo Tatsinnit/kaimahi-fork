@@ -221,8 +221,12 @@ func (a *App) previewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent,
 			filePath = "withheld"
 		}
 	}
+	scope := "full"
+	if opt.CaseID != "" {
+		scope = "subset"
+	}
 	r := FilePreviewResult{SchemaVersion: 1, Kind: "kmx.agent-file-preview", Operation: opt.Operation,
-		File: FilePreviewIdentity{Path: filePath}, Selection: FilePreviewSelection{Scope: "full", CaseIDs: []string{}},
+		File: FilePreviewIdentity{Path: filePath}, Selection: FilePreviewSelection{Scope: scope, CaseIDs: []string{}},
 		State: "refused", Verdict: runtime.EvaluationUnknown, Examples: []FilePreviewExample{}, Retention: FilePreviewRetention{Status: "not_requested"}}
 	fail := func(code string, exit int) (FilePreviewResult, *FilePreviewError) {
 		r.FullPass = false
@@ -295,7 +299,6 @@ func (a *App) previewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent,
 	parsed.Examples = agentfile.BindJudgeModels(parsed.Examples, judge.Model)
 	selected := parsed.Examples
 	if opt.CaseID != "" {
-		r.Selection.Scope = "subset"
 		selected = nil
 		for _, ex := range parsed.Examples {
 			if ex.ID == opt.CaseID {
@@ -458,7 +461,10 @@ func (a *App) previewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent,
 				r.Examples[i].Assertions[j].Judge = previewJudge(as, ex.Assertions[j], note, &judgeReasonBytes)
 			}
 		}
-		r.Examples[i].FilePreviewCompletion = previewCompleted(row.Completion, show)
+		completion := previewCompleted(row.Completion, show)
+		completion.ReasonCode = previewResultReasonCode(verdict)
+		completion.Reason = previewReason(completion.ReasonCode)
+		r.Examples[i].FilePreviewCompletion = completion
 		r.Examples[i].Verdict = verdict
 		all = append(all, row.Assertions...)
 	}
@@ -523,12 +529,7 @@ func (a *App) previewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent,
 		return r, nil
 	}
 	r.Verdict = runtime.EvaluationAssertionsVerdict(all)
-	r.ReasonCode = "checks_passed"
-	if r.Verdict == runtime.EvaluationFail {
-		r.ReasonCode = "assertion_failed"
-	} else if r.Verdict != runtime.EvaluationPass {
-		r.ReasonCode = "judge_unknown"
-	}
+	r.ReasonCode = previewResultReasonCode(r.Verdict)
 	r.Reason = previewReason(r.ReasonCode)
 	r.FullPass = r.Selection.Scope == "full" && r.Verdict == runtime.EvaluationPass
 	if r.Verdict != runtime.EvaluationPass {
@@ -622,6 +623,16 @@ func previewDurationMilliseconds(elapsed time.Duration) int64 {
 		return 0
 	}
 	return elapsed.Milliseconds()
+}
+
+func previewResultReasonCode(verdict runtime.EvaluationVerdict) string {
+	if verdict == runtime.EvaluationPass {
+		return "checks_passed"
+	}
+	if verdict == runtime.EvaluationFail {
+		return "assertion_failed"
+	}
+	return "judge_unknown"
 }
 
 func previewAssertion(id, kind string, v runtime.EvaluationVerdict) FilePreviewAssertion {

@@ -140,6 +140,11 @@ func TestFilePreviewSelectionAndPrivacy(t *testing.T) {
 				if subset && (fake.request.Examples[0].ID != "second" || result.Selection.Scope != "subset") {
 					t.Fatal("subset not explicit")
 				}
+				for _, example := range result.Examples {
+					if example.ReasonCode != "checks_passed" {
+						t.Fatalf("case reason does not explain verdict: %+v", example)
+					}
+				}
 				if !subset && fake.request.Examples[0].ID != "first" {
 					t.Fatal("authored order lost")
 				}
@@ -260,6 +265,10 @@ func TestFilePreviewRefusalsBeforeRunner(t *testing.T) {
 		{"route mismatch", func(o *FilePreviewOptions) {
 			o.Route = &modelaccess.Route{Provider: "fake", Model: "other", Auth: "none"}
 		}, "model_unavailable"},
+		{"subset route mismatch", func(o *FilePreviewOptions) {
+			o.CaseID = "first"
+			o.Route = &modelaccess.Route{Provider: "fake", Model: "other", Auth: "none"}
+		}, "model_unavailable"},
 		{"missing file", func(o *FilePreviewOptions) { o.File += "-missing" }, "invalid_file"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -269,6 +278,9 @@ func TestFilePreviewRefusalsBeforeRunner(t *testing.T) {
 			result, err := (&App{FileRunner: f}).PreviewAgentFile(context.Background(), opt)
 			if err == nil || result.ReasonCode != tc.code || f.calls != 0 || result.FullPass {
 				t.Fatalf("%+v / %v / calls %d", result, err, f.calls)
+			}
+			if opt.CaseID != "" && result.Selection.Scope != "subset" {
+				t.Fatalf("subset intent lost on refusal: %+v", result.Selection)
 			}
 		})
 	}

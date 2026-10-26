@@ -35,7 +35,7 @@ func (f *cliPreviewFake) Run(ctx context.Context, r agentpreview.Request) (agent
 	f.calls++
 	f.request = r
 	complete := func(id string) agentpreview.Completion {
-		return agentpreview.Completion{State: agentpreview.Complete, ID: id, FileRevision: r.Agent.Revision, Provider: r.Route.Provider, Model: r.Route.Model, Answer: "PRIVATE ANSWER", DurationMs: 1}
+		return agentpreview.Completion{State: agentpreview.Complete, ID: id, FileRevision: r.Agent.Revision, Provider: r.Route.Provider, Model: r.Route.Model, Answer: "PRIVATE ANSWER"}
 	}
 	o := agentpreview.Outcome{State: agentpreview.Complete, Journal: "private-handle"}
 	if r.Input != nil {
@@ -338,6 +338,33 @@ func TestFileCommandGitHubSummaryReportsPreExecutionRefusal(t *testing.T) {
 		t.Fatalf("refusal report: err=%v calls=%d read=%v summary=%q", err, runner.calls, readErr, markdown)
 	}
 }
+
+func TestFileCommandGitHubSummaryReportsRedactedRefusal(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cause error
+		code  string
+	}{
+		{"unsafe tool content", agentpreview.ErrUnsafeToolContent, "unsafe_tool_content"},
+		{"credential content", agentpreview.ErrCredentialContent, "credential_content"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, summary bytes.Buffer
+			deps, _ := testDependencies(&out, &bytes.Buffer{})
+			runner := &cliPreviewFake{verdict: runtime.EvaluationPass, cause: tc.cause}
+			deps.fileRunner = runner
+			deps.openGitHubSummary = func() (io.WriteCloser, error) { return writeCloseBuffer{Buffer: &summary}, nil }
+			err := execute([]string{"test", cliPreviewFile(t), "-o", "json", "--github-summary"}, deps)
+			if err == nil || exitCode(err) != 1 || runner.calls != 1 || !strings.Contains(out.String(), `"reasonCode":"`+tc.code+`"`) || !strings.Contains(summary.String(), "`unavailable`") || !strings.Contains(summary.String(), tc.code) || strings.Contains(out.String()+summary.String(), "PRIVATE") {
+				t.Fatalf("redacted refusal: err=%v output=%s summary=%s", err, out.String(), summary.String())
+			}
+		})
+	}
+}
+
+type writeCloseBuffer struct{ *bytes.Buffer }
+
+func (writeCloseBuffer) Close() error { return nil }
 
 type brokenSummary struct {
 	writeErr error

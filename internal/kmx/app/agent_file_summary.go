@@ -37,7 +37,11 @@ func WriteFilePreviewGitHubSummary(w io.Writer, result FilePreviewResult) error 
 		judge = summaryRoute(*result.JudgeRoute)
 	}
 	fmt.Fprintf(&out, "| Judge | `%s` |\n", judge)
-	fmt.Fprintf(&out, "| Scope | `%s` (%d selected / %d authored) |\n", result.Selection.Scope, len(result.Selection.CaseIDs), result.Selection.TotalCases)
+	if result.Selection.Scope == "" {
+		fmt.Fprintf(&out, "| Scope | `%s` |\n", summaryValue(result.Selection.Scope))
+	} else {
+		fmt.Fprintf(&out, "| Scope | `%s` (%d selected / %d authored) |\n", result.Selection.Scope, len(result.Selection.CaseIDs), result.Selection.TotalCases)
+	}
 	fmt.Fprintf(&out, "| Duration | %s |\n", summaryDuration(result.DurationMs))
 	fmt.Fprintf(&out, "| Reason | `%s`: %s |\n", result.ReasonCode, summaryReason(result.ReasonCode))
 
@@ -46,8 +50,7 @@ func WriteFilePreviewGitHubSummary(w io.Writer, result FilePreviewResult) error 
 		fmt.Fprintln(&out, "| Test | Verdict | Duration | Reason |")
 		fmt.Fprintln(&out, "|---|---|---:|---|")
 		for _, example := range result.Examples {
-			code := exampleReasonCode(example)
-			fmt.Fprintf(&out, "| `%s` | `%s` | %s | `%s`: %s |\n", example.ID, example.Verdict, summaryDuration(example.DurationMs), code, summaryReason(code))
+			fmt.Fprintf(&out, "| `%s` | `%s` | %s | `%s`: %s |\n", example.ID, example.Verdict, summaryDuration(example.DurationMs), example.ReasonCode, summaryReason(example.ReasonCode))
 		}
 
 		fmt.Fprint(&out, "\n### Checks\n\n")
@@ -124,7 +127,12 @@ func validFilePreviewSummary(result FilePreviewResult) bool {
 	if !summaryRouteValid(result.ModelRoute, true) || result.State == "complete" && result.ModelRoute.Provider == "" || result.JudgeRoute != nil && !summaryRouteValid(*result.JudgeRoute, false) {
 		return false
 	}
-	if result.Selection.Scope != "full" && result.Selection.Scope != "subset" || result.Selection.TotalCases < 0 || result.Selection.TotalCases > agentfile.MaxExamples || len(result.Selection.CaseIDs) > agentfile.MaxExamples || len(result.Examples) > len(result.Selection.CaseIDs) || result.Selection.TotalCases < len(result.Selection.CaseIDs) {
+	redactedReason := result.ReasonCode == "unsafe_tool_content" || result.ReasonCode == "credential_content"
+	redacted := redactedFilePreviewSummary(result)
+	if redactedReason != redacted {
+		return false
+	}
+	if !redacted && (result.Selection.Scope != "full" && result.Selection.Scope != "subset" || result.Selection.TotalCases < 0 || result.Selection.TotalCases > agentfile.MaxExamples || len(result.Selection.CaseIDs) > agentfile.MaxExamples || len(result.Examples) > len(result.Selection.CaseIDs) || result.Selection.TotalCases < len(result.Selection.CaseIDs)) {
 		return false
 	}
 	if result.State == "complete" && (len(result.Examples) != len(result.Selection.CaseIDs) || result.Selection.Scope == "full" && len(result.Selection.CaseIDs) != result.Selection.TotalCases) {
@@ -154,7 +162,7 @@ func validFilePreviewSummary(result FilePreviewResult) bool {
 		if !evaluationEvidenceID.MatchString(example.ID) || !summaryState(example.State) || !summaryVerdict(example.Verdict) || !summaryReasonCode(example.ReasonCode) || !summaryMilliseconds(example.DurationMs) || len(example.Assertions) > runtime.EvaluationMaxAssertions {
 			return false
 		}
-		if example.State == "complete" && example.ReasonCode != "completion_ready" || example.State != "complete" && example.DurationMs != 0 {
+		if example.State == "complete" && example.ReasonCode != previewResultReasonCode(example.Verdict) || example.State != "complete" && example.DurationMs != 0 {
 			return false
 		}
 		if example.State != "complete" && (example.Verdict != runtime.EvaluationUnknown || example.ReasonCode != "not_run") || example.State == "complete" && example.Verdict != summaryAssertionsVerdict(example.Assertions) {
@@ -196,6 +204,13 @@ func validFilePreviewSummary(result FilePreviewResult) bool {
 		return false
 	}
 	return true
+}
+
+func redactedFilePreviewSummary(result FilePreviewResult) bool {
+	return result.State == "refused" && (result.ReasonCode == "unsafe_tool_content" || result.ReasonCode == "credential_content") &&
+		result.Runner == "" && result.File == (FilePreviewIdentity{Path: "[agent file]"}) && result.ModelRoute == (FilePreviewRoute{}) && result.JudgeRoute == nil && result.Diagnostic == nil &&
+		result.Selection.Scope == "" && len(result.Selection.CaseIDs) == 0 && result.Selection.TotalCases == 0 && len(result.Examples) == 0 && result.AdHoc == nil &&
+		len(result.ToolSettings) == 0 && result.Retention.Status == "not_requested" && len(result.Retention.Diagnostics) == 0
 }
 
 func summaryAssertionsVerdict(assertions []FilePreviewAssertion) runtime.EvaluationVerdict {
@@ -283,16 +298,4 @@ func summaryReason(code string) string {
 		return reason
 	}
 	return "Unavailable."
-}
-
-func exampleReasonCode(example FilePreviewExample) string {
-	if example.Verdict == runtime.EvaluationPass {
-		return "checks_passed"
-	}
-	for _, assertion := range example.Assertions {
-		if assertion.Verdict == example.Verdict {
-			return assertion.ReasonCode
-		}
-	}
-	return example.ReasonCode
 }

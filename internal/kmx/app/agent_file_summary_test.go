@@ -19,7 +19,7 @@ func summaryFixture() FilePreviewResult {
 		Selection: FilePreviewSelection{Scope: "full", CaseIDs: []string{"greeting"}, TotalCases: 1},
 		State:     "complete", Verdict: runtime.EvaluationFail, FullPass: false, ReasonCode: "assertion_failed", Reason: "PRIVATE REASON", DurationMs: 2345,
 		Examples: []FilePreviewExample{{ID: "greeting", FilePreviewCompletion: FilePreviewCompletion{
-			State: "complete", ReasonCode: "completion_ready", Reason: "PRIVATE COMPLETION", DurationMs: 1234, AnswerExcerpt: "PRIVATE ANSWER", ToolCalls: 1,
+			State: "complete", ReasonCode: "assertion_failed", Reason: "PRIVATE COMPLETION", DurationMs: 1234, AnswerExcerpt: "PRIVATE ANSWER", ToolCalls: 1,
 			Tools: []agentpreview.ToolSummary{{Name: "lookup", Mode: "recorded", Source: "recorded", CallCount: 1}},
 		}, Verdict: runtime.EvaluationFail, Assertions: []FilePreviewAssertion{{ID: "greeting-text", Type: "contains", Verdict: runtime.EvaluationFail, ReasonCode: "assertion_failed", Reason: "PRIVATE ASSERTION"}}}},
 		Retention:    FilePreviewRetention{Status: "retained", Diagnostics: []FilePreviewRetainedDiagnostic{{ID: "f-" + strings.Repeat("b", 32), CaseID: "greeting"}}},
@@ -72,6 +72,7 @@ func TestFilePreviewGitHubSummaryRefusesUntrustedProjection(t *testing.T) {
 			r.Selection.TotalCases = 2
 		},
 		"case verdict": func(r *FilePreviewResult) { r.Examples[0].Verdict = runtime.EvaluationPass },
+		"case reason":  func(r *FilePreviewResult) { r.Examples[0].ReasonCode = "completion_ready" },
 		"check duplicate": func(r *FilePreviewResult) {
 			r.Examples[0].Assertions = append(r.Examples[0].Assertions, r.Examples[0].Assertions[0])
 		},
@@ -104,7 +105,7 @@ func TestFilePreviewGitHubSummaryBoundsRows(t *testing.T) {
 	result.Examples = nil
 	for i := 0; i < 9; i++ {
 		id := fmt.Sprintf("case-%02d", i)
-		example := FilePreviewExample{ID: id, FilePreviewCompletion: FilePreviewCompletion{State: "complete", ReasonCode: "completion_ready"}, Verdict: runtime.EvaluationPass}
+		example := FilePreviewExample{ID: id, FilePreviewCompletion: FilePreviewCompletion{State: "complete", ReasonCode: "checks_passed"}, Verdict: runtime.EvaluationPass}
 		for j := 0; j < runtime.EvaluationMaxAssertions; j++ {
 			example.Assertions = append(example.Assertions, FilePreviewAssertion{ID: fmt.Sprintf("c%02d-%02d", i, j), Type: "contains", Verdict: runtime.EvaluationPass, ReasonCode: "assertion_satisfied"})
 		}
@@ -130,5 +131,22 @@ func TestFilePreviewGitHubSummaryAllowsSafeEarlyRefusal(t *testing.T) {
 	var output bytes.Buffer
 	if err := WriteFilePreviewGitHubSummary(&output, result); err != nil || !strings.Contains(output.String(), "model_unavailable") || strings.Contains(output.String(), "PRIVATE") {
 		t.Fatalf("safe refusal summary: %v\n%s", err, output.String())
+	}
+}
+
+func TestFilePreviewGitHubSummaryAllowsClosedRedactedRefusal(t *testing.T) {
+	for _, code := range []string{"unsafe_tool_content", "credential_content"} {
+		t.Run(code, func(t *testing.T) {
+			result := FilePreviewResult{
+				SchemaVersion: 1, Kind: "kmx.agent-file-preview", Operation: "test",
+				File: FilePreviewIdentity{Path: "[agent file]"}, Selection: FilePreviewSelection{CaseIDs: []string{}},
+				State: "refused", Verdict: runtime.EvaluationUnknown, ReasonCode: code, Reason: "PRIVATE", Examples: []FilePreviewExample{},
+				Retention: FilePreviewRetention{Status: "not_requested"},
+			}
+			var output bytes.Buffer
+			if err := WriteFilePreviewGitHubSummary(&output, result); err != nil || !strings.Contains(output.String(), "`unavailable`") || !strings.Contains(output.String(), code) || strings.Contains(output.String(), "PRIVATE") || strings.Contains(output.String(), "selected / ") {
+				t.Fatalf("redacted refusal summary: %v\n%s", err, output.String())
+			}
+		})
 	}
 }
