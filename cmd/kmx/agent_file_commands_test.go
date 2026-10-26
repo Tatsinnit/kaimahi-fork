@@ -380,6 +380,7 @@ func (b brokenSummary) Write(p []byte) (int, error) {
 func (b brokenSummary) Close() error { return b.closeErr }
 
 func TestFileCommandGitHubSummaryWriteAndCloseFailuresExitOneAfterExecution(t *testing.T) {
+	t.Setenv("KMX_HOME", privateCommandHome(t))
 	for _, tc := range []struct {
 		name string
 		sink brokenSummary
