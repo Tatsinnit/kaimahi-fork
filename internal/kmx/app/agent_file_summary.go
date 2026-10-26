@@ -124,6 +124,10 @@ func validFilePreviewSummary(result FilePreviewResult) bool {
 	if result.File.Revision != "" && (!strings.HasPrefix(result.File.Revision, "sha256:") || !verificationDigest(strings.TrimPrefix(result.File.Revision, "sha256:"))) {
 		return false
 	}
+	savedRevision := result.SavedRevision != ""
+	if savedRevision && (result.State != "complete" || result.SavedRevision == result.File.Revision || !strings.HasPrefix(result.SavedRevision, "sha256:") || !verificationDigest(strings.TrimPrefix(result.SavedRevision, "sha256:"))) {
+		return false
+	}
 	if !summaryRouteValid(result.ModelRoute, true) || result.State == "complete" && result.ModelRoute.Provider == "" || result.JudgeRoute != nil && !summaryRouteValid(*result.JudgeRoute, false) {
 		return false
 	}
@@ -158,6 +162,7 @@ func validFilePreviewSummary(result FilePreviewResult) bool {
 	if len(result.Examples) > agentfile.MaxExamples {
 		return false
 	}
+	recordingsSaved := 0
 	for _, example := range result.Examples {
 		if !evaluationEvidenceID.MatchString(example.ID) || !summaryState(example.State) || !summaryVerdict(example.Verdict) || !summaryReasonCode(example.ReasonCode) || !summaryMilliseconds(example.DurationMs) || len(example.Assertions) > runtime.EvaluationMaxAssertions {
 			return false
@@ -177,8 +182,14 @@ func validFilePreviewSummary(result FilePreviewResult) bool {
 		}
 		calls := 0
 		for _, tool := range example.Tools {
-			if !localtools.ValidToolName(tool.Name) || seenTools[tool.Name] || len(settings) > 0 && !settings[tool.Name] || tool.Mode != "live" && tool.Mode != "recorded" || tool.Source != "live" && tool.Source != "recorded" && tool.Source != "unavailable" || tool.Mode == "live" && tool.Source == "recorded" || tool.CallCount < 0 || tool.CallCount > localtools.MaxCalls || tool.RecordingSaved {
+			if !localtools.ValidToolName(tool.Name) || seenTools[tool.Name] || len(settings) > 0 && !settings[tool.Name] || tool.Mode != "live" && tool.Mode != "recorded" || tool.Source != "live" && tool.Source != "recorded" && tool.Source != "unavailable" || tool.Mode == "live" && tool.Source == "recorded" || tool.CallCount < 0 || tool.CallCount > localtools.MaxCalls {
 				return false
+			}
+			if tool.RecordingSaved {
+				if !savedRevision || tool.Mode != "recorded" || tool.Source != "live" || tool.CallCount == 0 {
+					return false
+				}
+				recordingsSaved++
 			}
 			seenTools[tool.Name] = true
 			calls += tool.CallCount
@@ -199,6 +210,9 @@ func validFilePreviewSummary(result FilePreviewResult) bool {
 		if example.State == "complete" && result.DurationMs < example.DurationMs {
 			return false
 		}
+	}
+	if savedRevision != (recordingsSaved > 0) {
+		return false
 	}
 	if summaryUsesJudge(result) && result.JudgeRoute == nil {
 		return false

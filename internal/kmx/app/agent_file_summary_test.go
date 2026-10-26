@@ -65,7 +65,13 @@ func TestFilePreviewGitHubSummaryRefusesUntrustedProjection(t *testing.T) {
 		"duration":      func(r *FilePreviewResult) { r.DurationMs = -1 },
 		"tool":          func(r *FilePreviewResult) { r.Examples[0].Tools[0].Name = "PRIVATE|TOOL" },
 		"tool count":    func(r *FilePreviewResult) { r.Examples[0].ToolCalls = 0 },
-		"full pass":     func(r *FilePreviewResult) { r.FullPass = true },
+		"save without acknowledgment": func(r *FilePreviewResult) {
+			r.SavedRevision = "sha256:" + strings.Repeat("b", 64)
+		},
+		"acknowledgment without save": func(r *FilePreviewResult) {
+			r.Examples[0].Tools[0].RecordingSaved = true
+		},
+		"full pass": func(r *FilePreviewResult) { r.FullPass = true },
 		"case duplicate": func(r *FilePreviewResult) {
 			r.Selection.CaseIDs = []string{"greeting", "greeting"}
 			r.Examples = append(r.Examples, r.Examples[0])
@@ -93,6 +99,34 @@ func TestFilePreviewGitHubSummaryRefusesUntrustedProjection(t *testing.T) {
 			var output bytes.Buffer
 			if err := WriteFilePreviewGitHubSummary(&output, result); err == nil || output.Len() != 0 {
 				t.Fatalf("untrusted projection accepted: %v / %q", err, output.String())
+			}
+		})
+	}
+}
+
+func TestFilePreviewGitHubSummaryAllowsSavedRecording(t *testing.T) {
+	result := summaryFixture()
+	result.SavedRevision = "sha256:" + strings.Repeat("b", 64)
+	tool := &result.Examples[0].Tools[0]
+	tool.Mode, tool.Source, tool.RecordingSaved = "recorded", "live", true
+	var output bytes.Buffer
+	if err := WriteFilePreviewGitHubSummary(&output, result); err != nil || !strings.Contains(output.String(), "`live`") || strings.Contains(output.String(), result.SavedRevision) {
+		t.Fatalf("saved recording summary: %v\n%s", err, output.String())
+	}
+	for name, mutate := range map[string]func(*FilePreviewResult){
+		"recorded source": func(r *FilePreviewResult) { r.Examples[0].Tools[0].Source = "recorded" },
+		"live mode":       func(r *FilePreviewResult) { r.Examples[0].Tools[0].Mode = "live" },
+		"no call":         func(r *FilePreviewResult) { r.Examples[0].Tools[0].CallCount, r.Examples[0].ToolCalls = 0, 0 },
+		"same revision":   func(r *FilePreviewResult) { r.SavedRevision = r.File.Revision },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := result
+			bad.Examples = append([]FilePreviewExample(nil), result.Examples...)
+			bad.Examples[0].Tools = append([]agentpreview.ToolSummary(nil), result.Examples[0].Tools...)
+			mutate(&bad)
+			var rejected bytes.Buffer
+			if err := WriteFilePreviewGitHubSummary(&rejected, bad); err == nil || rejected.Len() != 0 {
+				t.Fatalf("invalid saved recording accepted: %v / %q", err, rejected.String())
 			}
 		})
 	}
