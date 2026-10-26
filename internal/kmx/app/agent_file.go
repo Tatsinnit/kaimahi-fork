@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentfile"
@@ -53,6 +54,7 @@ type FilePreviewResult struct {
 	FullPass      bool                      `json:"fullPass"`
 	ReasonCode    string                    `json:"reasonCode"`
 	Reason        string                    `json:"reason"`
+	DurationMs    int64                     `json:"durationMs"`
 	Examples      []FilePreviewExample      `json:"examples"`
 	AdHoc         *FilePreviewCompletion    `json:"adHoc,omitempty"`
 	Retention     FilePreviewRetention      `json:"retention"`
@@ -105,6 +107,7 @@ type FilePreviewCompletion struct {
 	Reason        string                     `json:"reason"`
 	AnswerExcerpt string                     `json:"answerExcerpt,omitempty"`
 	Truncated     bool                       `json:"truncated,omitempty"`
+	DurationMs    int64                      `json:"durationMs"`
 	ToolCalls     int                        `json:"toolCalls,omitempty"`
 	Tools         []agentpreview.ToolSummary `json:"tools,omitempty"`
 }
@@ -192,11 +195,12 @@ func previewReason(code string) string {
 
 // PreviewAgentFile is the CLI path wrapper: load once, then execute that snapshot.
 func (a *App) PreviewAgentFile(ctx context.Context, opt FilePreviewOptions) (FilePreviewResult, error) {
+	started := a.timeNow()
 	parsed, err := agentfile.Load(opt.File)
 	if err == nil && opt.RetentionFile != "" && opt.retentionScope == nil {
 		opt = WithFilePreviewRetention(opt, opt.RetentionFile, parsed.Revision)
 	}
-	return a.previewAgentSnapshot(ctx, parsed, opt, err)
+	return a.previewAgentSnapshot(ctx, parsed, opt, err, started)
 }
 
 // PreviewAgentSnapshot executes a caller-owned parsed snapshot without reopening
@@ -204,10 +208,11 @@ func (a *App) PreviewAgentFile(ctx context.Context, opt FilePreviewOptions) (Fil
 // The caller must obtain parsed from agentfile.Parse/Load and not mutate it while
 // the operation runs. Preview results grant no native evidence/deploy authority.
 func (a *App) PreviewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent, opt FilePreviewOptions) (FilePreviewResult, error) {
-	return a.previewAgentSnapshot(ctx, parsed, opt, nil)
+	return a.previewAgentSnapshot(ctx, parsed, opt, nil, a.timeNow())
 }
 
-func (a *App) previewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent, opt FilePreviewOptions, parseErr error) (FilePreviewResult, error) {
+func (a *App) previewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent, opt FilePreviewOptions, parseErr error, started time.Time) (result FilePreviewResult, resultErr error) {
+	defer func() { result.DurationMs = previewDurationMilliseconds(a.timeNow().Sub(started)) }()
 	filePath := suiteDiagnosticIdentity(filepath.Base(opt.File), nil)
 	if opt.FullPath {
 		var safe bool
@@ -301,7 +306,13 @@ func (a *App) previewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent,
 			return fail("invalid_selection", 1)
 		}
 	}
-	if opt.JudgeRoute != nil {
+	usesJudge := opt.JudgeRoute != nil
+	for _, ex := range selected {
+		for _, assertion := range ex.Assertions {
+			usesJudge = usesJudge || assertion.Type == "llmJudge"
+		}
+	}
+	if usesJudge {
 		r.JudgeRoute = &FilePreviewRoute{judge.Provider, judge.Model}
 	}
 	if len(parsed.Tools) == 0 && opt.ToolBindings != "" {
@@ -393,7 +404,7 @@ func (a *App) previewAgentSnapshot(ctx context.Context, parsed *agentfile.Agent,
 		if !validPreviewTools(c, ex, parsed.Tools) {
 			return false
 		}
-		if c.ToolCalls < 0 || c.ToolCalls > localtools.MaxCalls || len(parsed.Tools) == 0 && c.ToolCalls != 0 || c.State != agentpreview.Complete || c.ID == "" || seen[c.ID] || c.FileRevision != parsed.Revision || c.Provider != route.Provider || c.Model != route.Model || len(c.Answer) > 256*1024 || !utf8.ValidString(c.Answer) {
+		if c.DurationMs < 0 || c.DurationMs > (5*time.Minute).Milliseconds() || c.ToolCalls < 0 || c.ToolCalls > localtools.MaxCalls || len(parsed.Tools) == 0 && c.ToolCalls != 0 || c.State != agentpreview.Complete || c.ID == "" || seen[c.ID] || c.FileRevision != parsed.Revision || c.Provider != route.Provider || c.Model != route.Model || len(c.Answer) > 256*1024 || !utf8.ValidString(c.Answer) {
 			return false
 		}
 		seen[c.ID] = true
@@ -595,6 +606,7 @@ func previewCompletion(state, code string) FilePreviewCompletion {
 }
 func previewCompleted(c agentpreview.Completion, show bool) FilePreviewCompletion {
 	row := previewCompletion("complete", "completion_ready")
+	row.DurationMs = c.DurationMs
 	row.ToolCalls = c.ToolCalls
 	row.Tools = append([]agentpreview.ToolSummary(nil), c.Tools...)
 	if show {
@@ -604,6 +616,14 @@ func previewCompleted(c agentpreview.Completion, show bool) FilePreviewCompletio
 	}
 	return row
 }
+
+func previewDurationMilliseconds(elapsed time.Duration) int64 {
+	if elapsed <= 0 {
+		return 0
+	}
+	return elapsed.Milliseconds()
+}
+
 func previewAssertion(id, kind string, v runtime.EvaluationVerdict) FilePreviewAssertion {
 	code := "judge_unknown"
 	if v == runtime.EvaluationPass {

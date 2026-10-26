@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentpreview"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/modelaccess"
@@ -31,7 +32,7 @@ func (f *scriptedPreview) Run(ctx context.Context, req agentpreview.Request) (ag
 	f.calls++
 	f.request = req
 	complete := func(id string) agentpreview.Completion {
-		return agentpreview.Completion{State: agentpreview.Complete, ID: id, FileRevision: req.Agent.Revision, Provider: req.Route.Provider, Model: req.Route.Model, Answer: "PRIVATE ANSWER\x1b[31m"}
+		return agentpreview.Completion{State: agentpreview.Complete, ID: id, FileRevision: req.Agent.Revision, Provider: req.Route.Provider, Model: req.Route.Model, Answer: "PRIVATE ANSWER\x1b[31m", DurationMs: 1}
 	}
 	out := agentpreview.Outcome{State: agentpreview.Complete, Journal: "PRIVATE JOURNAL"}
 	if req.Input != nil {
@@ -176,6 +177,31 @@ func TestFilePreviewSelectionAndPrivacy(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestFilePreviewReportsTotalAndPerTestDuration(t *testing.T) {
+	start := time.Unix(100, 0)
+	times := []time.Time{start, start.Add(2500 * time.Millisecond)}
+	fake := &scriptedPreview{verdict: runtime.EvaluationPass, mutate: func(out *agentpreview.Outcome) {
+		out.Examples[0].Completion.DurationMs = 700
+		out.Examples[1].Completion.DurationMs = 900
+	}}
+	a := &App{FileRunner: fake, now: func() time.Time {
+		if len(times) == 0 {
+			t.Fatal("unexpected clock read")
+		}
+		now := times[0]
+		times = times[1:]
+		return now
+	}}
+	result, err := a.PreviewAgentFile(t.Context(), FilePreviewOptions{File: previewFile(t), Operation: "test"})
+	if err != nil || result.DurationMs != 2500 || result.Examples[0].DurationMs != 700 || result.Examples[1].DurationMs != 900 || len(times) != 0 {
+		t.Fatalf("timings=%+v err=%v remaining=%d", result, err, len(times))
+	}
+	var output bytes.Buffer
+	if err := WriteFilePreview(&output, result, "json"); err != nil || !strings.Contains(output.String(), `"durationMs":2500`) || strings.Count(output.String(), `"durationMs":`) != 3 {
+		t.Fatalf("JSON timing contract: %v / %s", err, output.String())
 	}
 }
 
