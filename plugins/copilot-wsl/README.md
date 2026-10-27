@@ -36,20 +36,24 @@ For an existing direct install, follow [migration and paired upgrades](../../doc
 ## Use
 
 In Copilot, ask: `Create a kmx agent called Release notes that writes a short
-release note from a supplied pull request title, and open its canvas.` Give it a
+release note from a supplied pull request title, and open it.` Give it a
 full WSL path when the file is outside the current directory. The same server
 handles files in unrelated repositories.
 
 To open an existing file without a model turn, use
 `/kmx-canvas open /mnt/c/work/release-notes.agent.md`. Keep path spaces literal,
 without surrounding quotes. `/kmx-canvas` or `/kmx-canvas help` shows usage;
-`/agent-view FULL_PATH` shows read-only text. Native open was checked with matching
+`/agent-view FULL_PATH` shows bounded read-only text. The chat opener's text mode
+also returns exact source/revision when the checked resource is editable, so a
+fresh extension-backed chat can continue with revision-checked Edit. Native open was checked with matching
 main plugin and binary, not the pinned rc.3 pair. If it fails or shows nothing on
-rc.3, try `Open the kmx canvas for FULL_PATH` through chat.
+rc.3, try `Open the kmx agent for FULL_PATH` through chat.
 
 In the interactive CLI, use `copilot --experimental` to load those native
 commands. Without the extension, `/agent-view` is unavailable too. Select the
-full installed plugin skill entry; short `/kmx` is not a universal CLI command.
+full installed plugin skill entry: `/kmx-agent-builder:kmx open FULL_PATH` or
+`/kmx-agent-builder:kmx-agent-builder` followed by a builder task. Short `/kmx`
+is not a universal CLI command.
 See the [launch table and CLI spellings](../../docs/copilot-app.md#launch-commands-and-phrases)
 for create/open/run/test requests, saved-snapshot test additions and recovery.
 CLI command checks are not a new Copilot-app acceptance claim.
@@ -82,7 +86,12 @@ prompts and inputs to the selected model. On hosts that forward native tool
 progress, test rows update as cases finish. The final full Test result remains
 authoritative. Local model comparison is lost when the canvas is closed and
 reopened. An unconfirmed execution requires reload rather than silently retrying.
-If the host has no canvas renderer, the same kmx tools remain available in text.
+If the host has no canvas renderer, text mode is a normal success path. Chat
+reports structured Test rows and keeps a chosen runtime model for that exact file
+within the conversation. It lists newly saved tests as not run, requests answer
+content only when asked and never reruns to recover omitted content. Without the
+extension, a same-chat workflow can continue from returned source/revision, but a
+fresh chat cannot safely reopen an existing file.
 
 See the [agent-file guide](../../docs/agent-file.md) for authoring and checks,
 and the [macOS/PATH plugin guide](../copilot/README.md) for the Mac install and

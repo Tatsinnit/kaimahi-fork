@@ -29,8 +29,11 @@ class PlainPluginTests(unittest.TestCase):
             with self.subTest(name=name):
                 if name in derived:
                     self.assertFalse((HERE / name).is_symlink())
-                    self.assertEqual((HERE / name).read_bytes(), (SHARED / name).read_bytes().replace(
-                        b"plugin:kmx-agent-builder:agent-view", b"plugin:kmx-agent-builder-path:agent-view"))
+                    expected = (SHARED / name).read_bytes().replace(
+                        b"plugin:kmx-agent-builder:agent-view", b"plugin:kmx-agent-builder-path:agent-view")
+                    if name.startswith("skills/"):
+                        expected = expected.replace(b"/kmx-agent-builder:", b"/kmx-agent-builder-path:")
+                    self.assertEqual((HERE / name).read_bytes(), expected)
                 else:
                     self.assertEqual((HERE / name).resolve(), (SHARED / name).resolve())
                     self.assertEqual((HERE / name).read_bytes(), (SHARED / name).read_bytes())

@@ -662,15 +662,26 @@ a revision change marks the old observation stale and withholds its details.
 Reads perform no inference, mutation or journal retrieval.
 
 The [Windows/WSL plugin](../plugins/copilot-wsl/README.md) and
-[macOS/PATH plugin](../plugins/copilot/README.md) share a
-native authoring canvas and read-only `/agent-view PATH` text fallback over this
-resource. Canvas Edit/Test/Run use existing same-session MCP tools; only explicit
+[macOS/PATH plugin](../plugins/copilot/README.md) share a native authoring canvas,
+revision-bound chat text fallback and read-only `/agent-view PATH` display over
+this resource. The text opener returns the full revision and exact source only
+when the resource supplied a complete authoring snapshot; its bounded display is
+never an Edit baseline. Canvas and chat Edit/Test/Run use existing same-session MCP tools; only explicit
 **Suggest tests** starts chat with the exact saved source, path and revision,
 asking Copilot for one revision-checked Edit without running tests or requiring a
 resource-reader tool. Its status acknowledges the request, not a completed addition. Saves require the original revision; changed result
 revisions are labelled stale rather than silently rebasing the draft.
 Inspection can show a minimal titled agent as well as a canonical Squad charter;
 this display-only support does not change Run/Test parser acceptance.
+
+Shared skills consume Run/Test `structuredContent`, keep full and subset results
+distinct and report one row per returned test; tool-call success alone is never a
+pass. A conversation-local runtime model choice is scoped to the exact path and
+never changes authored source. Answer content is requested only when the user
+asks and is never recovered with an automatic rerun. Without the extension,
+same-chat work can continue from source/revision returned by Create/Edit, while a
+fresh chat gains no file read or shell fallback. See
+[Copilot CLI text mode](copilot-cli-text-mode.md).
 
 The canvas check chooser offers Contains, Not contains, Regex and Judge. Judge
 edits the existing `llmJudge` fields: a multiline rubric, integer minimum score

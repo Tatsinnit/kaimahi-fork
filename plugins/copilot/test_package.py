@@ -265,12 +265,13 @@ class PackageTests(unittest.TestCase):
         skill = (self.out / "skills/kmx-agent-builder/SKILL.md").read_text()
         for required in ["schemaVersion", "fullPass", "selection.scope", "reasonCode",
                          "not_requested", "assertion", "unknown", "untrusted", "Explain",
-                         "Model", "Examples", "agent files", "Do not"]:
+                         "Model", "Examples", "agent files", "Do not", "Partial pass",
+                         "Inconclusive", "showContent: true", "never rerun", "not run"]:
             self.assertIn(required, skill)
         prose = " ".join(skill.split())
-        self.assertIn("full pass only when fullPass is true, state is complete and verdict is pass", prose)
-        self.assertIn("A subset may have verdict pass but fullPass false.", prose)
-        self.assertIn("Missing/unknown versions, states or verdicts are not passes.", prose)
+        self.assertIn("full scope + `fullPass: true`", prose)
+        self.assertIn("`fullPass: false`", prose)
+        self.assertIn("Missing, contradictory or unknown fields are not passes.", prose)
         self.assertNotIn("kmx test explain --file", skill)
         self.assertNotIn("PLUGIN_ROOT", skill)
         scripts = {p.relative_to(self.out).as_posix() for p in self.out.rglob("*")

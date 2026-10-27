@@ -34,7 +34,7 @@ The catalog pins source to the binary release's full commit SHA, not main.
 A plugin update never upgrades kmx. See [direct-install migration and paired upgrades](../../docs/copilot-app.md#existing-direct-installs-and-upgrades); keep native bundle setup separate.
 
 Ask Copilot: `Create a kmx agent called Release notes that writes a short release
-note from a supplied pull request title, and open its canvas.` Give it a full
+note from a supplied pull request title, and open it.` Give it a full
 Mac path when the file is outside the current directory. See the
 [launch table and CLI spellings](../../docs/copilot-app.md#launch-commands-and-phrases)
 for explicit create/open/run/test requests and saved-snapshot test additions.
@@ -203,7 +203,7 @@ or cross-compilation do not qualify Squad on Windows/macOS.
 ## Agent authoring canvas
 
 Ask Copilot to make an agent. The builder skill creates it through kmx and then
-opens the successful Create result's exact path in the canvas. To open an
+opens the successful Create result's exact path in a canvas or text view. To open an
 existing agent **without a model turn**, select the native **kmx-canvas** command:
 `/kmx-canvas open /home/me/project/greeter.agent.md`. It opens or focuses the
 same file's canvas; a relative path is read in the session folder. If the canvas
@@ -231,12 +231,24 @@ view. Opening does not edit, run or test the agent; the existing authoring
 controls and their checks remain unchanged. No folder confirmation is required.
 
 When the extension is loaded but the host cannot open a canvas, the native
-opener can return a text fallback. `/agent-view FULL_PATH` also displays the
-projection as read-only text; canonical Squad paths work there too. Neither
+opener returns a successful text fallback with the full file revision and, only
+from a checked complete snapshot, exact source and editability. Its bounded text
+is display-only and never an Edit baseline. `/agent-view FULL_PATH` also displays
+the projection as read-only text; canonical Squad paths work there too. Neither
 fallback exists when the extension itself is absent. Native commands must be
 submitted interactively: slash text passed to `copilot -p` is interpreted by the
 model instead. A headless CLI canvas acknowledgement/browser URL does not prove
 that the Copilot app rendered the view.
+
+The shared chat skill reads Run/Test from `structuredContent`, not tool-call
+success. It reports revision, runtime model, full/subset counts and one row per
+returned test while keeping failed, inconclusive, refused, cancelled and error
+outcomes distinct. A runtime model choice remains conversation-local to the
+exact path and never edits source. Answers require an explicit request and are
+never recovered by rerunning. Newly saved tests are listed as not run unless the
+user also asked to Test them. Without the extension, same-chat work can continue
+from source/revision already returned by Create/Edit; a fresh chat gains no read
+tool or shell fallback.
 
 Native open was checked with matching main plugin and binary, newer than the
 pinned rc.3 install. On rc.3, try `Open the kmx canvas for FULL_PATH` if the native

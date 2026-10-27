@@ -31,7 +31,8 @@ class SourceReleaseTests(unittest.TestCase):
                 path = plugin / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 identity = "kmx-agent-builder" if directory == "copilot-wsl" else "kmx-agent-builder-path"
-                path.write_bytes(f"unchanged MCP kmx-agent-builder\r\nplugin:{identity}:agent-view\r\n".encode())
+                entry = "kmx-agent-builder" if directory == "copilot-wsl" else "kmx-agent-builder-path"
+                path.write_bytes(f"unchanged MCP kmx-agent-builder\r\nplugin:{identity}:agent-view\r\n/{entry}:kmx\r\n".encode())
 
         wsl = self.root / "plugins/copilot-wsl" / VIEW
         (wsl / "failure-wording.json").write_text(WORDING)
@@ -77,7 +78,7 @@ class SourceReleaseTests(unittest.TestCase):
         self.assertEqual(self.run_check("--version", "v0.9.0").returncode, 1)
         self.assertEqual(self.run_check("--version", "0.9.0-rc.3").returncode, 1)
 
-    def test_write_stamps_both_manifests_and_only_substitutes_provider(self):
+    def test_write_stamps_both_manifests_and_substitutes_variant_identity(self):
         for version in ("v0.9.0-rc.4", "v0.9.0"):
             result = self.run_check("--write", "--version", version)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -87,7 +88,8 @@ class SourceReleaseTests(unittest.TestCase):
             self.assertEqual(self.run_check("--version", version).returncode, 0)
         for relative in DERIVED:
             derived = (self.root / "plugins/copilot" / relative).read_bytes()
-            self.assertEqual(derived, b"unchanged MCP kmx-agent-builder\r\nplugin:kmx-agent-builder-path:agent-view\r\n")
+            suffix = b"/kmx-agent-builder-path:kmx\r\n" if relative.startswith("skills/") else b"/kmx-agent-builder:kmx\r\n"
+            self.assertEqual(derived, b"unchanged MCP kmx-agent-builder\r\nplugin:kmx-agent-builder-path:agent-view\r\n" + suffix)
         before = self.snapshot()
         self.assertEqual(self.run_check("--write").returncode, 0)
         self.assertEqual(self.snapshot(), before)

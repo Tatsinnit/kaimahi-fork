@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check source-plugin versions and derive PATH provider references from WSL sources.
+"""Check source-plugin versions and derive PATH variant identities from WSL sources.
 
 Run from the repository root. Checks never write; --write explicitly regenerates
 three identity-bearing files and optionally stamps the paired release version.
@@ -18,6 +18,8 @@ IDENTITIES = {"copilot-wsl": "kmx-agent-builder", "copilot": "kmx-agent-builder-
 WORDING = "plugins/copilot-wsl/com.github.copilot/extensions/agent-view/failure-wording"
 PROVIDER = b"plugin:kmx-agent-builder:agent-view"
 PATH_PROVIDER = b"plugin:kmx-agent-builder-path:agent-view"
+SKILL_ENTRY = b"/kmx-agent-builder:"
+PATH_SKILL_ENTRY = b"/kmx-agent-builder-path:"
 NUMBER = r"(?:0|[1-9][0-9]*)"
 PRERELEASE = r"(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
 SEMVER = re.compile(rf"{NUMBER}\.{NUMBER}\.{NUMBER}(?:-{PRERELEASE}(?:\.{PRERELEASE})*)?")
@@ -56,7 +58,10 @@ def derived(root: Path) -> dict:
         canonical = (root / "plugins/copilot-wsl" / relative).read_bytes()
         if PROVIDER not in canonical:
             raise ValueError(f"{relative}: canonical provider reference missing")
-        files[root / "plugins/copilot" / relative] = canonical.replace(PROVIDER, PATH_PROVIDER)
+        content = canonical.replace(PROVIDER, PATH_PROVIDER)
+        if relative.startswith("skills/"):
+            content = content.replace(SKILL_ENTRY, PATH_SKILL_ENTRY)
+        files[root / "plugins/copilot" / relative] = content
     return files
 
 
