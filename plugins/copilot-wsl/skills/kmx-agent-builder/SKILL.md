@@ -122,6 +122,13 @@ If the invocation supplied an explicit model or trusted route, require the
 returned provider/model to match that request too; otherwise use the attributable
 returned route as the effective choice. Any identity mismatch is **Not current**,
 never a pass, and cannot update the remembered model.
+If an otherwise attributable result includes `savedRevision`, the invocation ran
+the held `file.revision`, but recording capture changed the saved file. Treat the
+held source and revision as stale. Before any later Run, Test or Edit, read a
+checked agent resource for the same path, require its revision to equal
+`savedRevision`, and use that refreshed revision and source. If that refresh is
+unavailable or does not match, make no later call; never pair the old source with
+the saved revision.
 Start with the exact revision, provider/model and `selection.scope`, including
 selected versus total counts. Then report one row for every returned example:
 test ID, state, verdict and safe `reasonCode`; for a non-pass, include attributed

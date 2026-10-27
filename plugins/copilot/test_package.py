@@ -272,7 +272,8 @@ class PackageTests(unittest.TestCase):
         for required in ["full-content Edit", "exampleEdits", "SHA-256",
                          "checked complete authoring snapshot", "withhold further edits",
                          "returned file path and revision", "returned provider/model",
-                         "identity mismatch is **Not current**"]:
+                         "identity mismatch is **Not current**", "savedRevision",
+                         "held source and revision as stale", "never pair the old source"]:
             self.assertIn(required, prose)
         self.assertIn("full scope + `fullPass: true`", prose)
         self.assertIn("`fullPass: false`", prose)

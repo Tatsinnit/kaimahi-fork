@@ -120,6 +120,13 @@ returned provider/model; when none was supplied, the attributable returned route
 is the effective choice. A mismatch is **Not current**, never pass, and cannot
 change the remembered model.
 
+An attributable result with `savedRevision` still describes execution against
+its returned `file.revision`; recording capture changed the saved file afterward.
+Before a later Run, Test or Edit, chat reads a checked snapshot for the same path,
+requires its revision to equal `savedRevision`, and uses the refreshed revision
+and source. It never combines the pre-capture source with the saved revision or
+continues when that refresh is unavailable or mismatched.
+
 The overall labels are closed:
 
 | Structured result | Chat label |

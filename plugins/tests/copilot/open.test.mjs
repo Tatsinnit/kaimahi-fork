@@ -334,6 +334,10 @@ for (const variant of ["copilot-wsl", "copilot"]) test(`${variant} skill help di
   assert.match(builder, /returned file path and revision/);
   assert.match(builder, /returned provider\/model/);
   assert.match(builder, /identity mismatch is \*\*Not current\*\*/);
+  assert.match(builder, /result includes `savedRevision`/);
+  assert.match(builder, /held source and revision as stale/);
+  assert.match(builder, /Before any later Run, Test or Edit, read a\s+checked agent resource for the same path/);
+  assert.match(builder, /never pair the old source with\s+the saved revision/);
   for (const marker of ["structuredContent", "Full pass", "Partial pass", "Inconclusive", "Refused", "Cancelled", "Did not finish", "showContent: true", "never rerun"]) assert.ok(builder.includes(marker), marker);
 });
 
