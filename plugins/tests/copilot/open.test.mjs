@@ -331,6 +331,9 @@ for (const variant of ["copilot-wsl", "copilot"]) test(`${variant} skill help di
   assert.match(builder, /Edit with `exampleEdits`/);
   assert.match(builder, /obtain a checked complete authoring\s+snapshot/);
   assert.match(builder, /withhold further edits/);
+  assert.match(builder, /returned file path and revision/);
+  assert.match(builder, /returned provider\/model/);
+  assert.match(builder, /identity mismatch is \*\*Not current\*\*/);
   for (const marker of ["structuredContent", "Full pass", "Partial pass", "Inconclusive", "Refused", "Cancelled", "Did not finish", "showContent: true", "never rerun"]) assert.ok(builder.includes(marker), marker);
 });
 

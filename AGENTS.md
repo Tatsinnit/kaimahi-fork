@@ -581,7 +581,9 @@ formatted or truncated text. Without the extension, same-chat Create/Edit/Run/Te
 may continue from returned source/revision, but a fresh chat gains no read tool or
 shell fallback. Shared skills read Run/Test structuredContent, preserve full versus
 subset and fail/unknown/refused/cancelled/error distinctions, and never infer pass
-from tool success. Conversation-local model choice is path-scoped, never source or
+from tool success. Returned path/revision and any explicit requested route/model
+must match the held invocation before attribution; mismatch is not current, never
+pass. Conversation-local model choice is path-scoped, never source or
 history; answer content requires an explicit request and is never recovered by a
 second send. Retain submitted source with an Edit result only after its SHA-256
 matches the returned revision; sparse exampleEdits require a fresh checked

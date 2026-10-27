@@ -270,7 +270,9 @@ class PackageTests(unittest.TestCase):
             self.assertIn(required, skill)
         prose = " ".join(skill.split())
         for required in ["full-content Edit", "exampleEdits", "SHA-256",
-                         "checked complete authoring snapshot", "withhold further edits"]:
+                         "checked complete authoring snapshot", "withhold further edits",
+                         "returned file path and revision", "returned provider/model",
+                         "identity mismatch is **Not current**"]:
             self.assertIn(required, prose)
         self.assertIn("full scope + `fullPass: true`", prose)
         self.assertIn("`fullPass: false`", prose)

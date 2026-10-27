@@ -114,6 +114,12 @@ case count. Emit one row for every returned example, retaining its test ID,
 state, verdict and safe `reasonCode`; a non-pass row may also name its attributed
 assertion ID/type/reason code.
 
+The returned file path and revision must match the held invocation target and
+revision. An explicitly requested model or trusted route must also match the
+returned provider/model; when none was supplied, the attributable returned route
+is the effective choice. A mismatch is **Not current**, never pass, and cannot
+change the remembered model.
+
 The overall labels are closed:
 
 | Structured result | Chat label |
