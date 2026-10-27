@@ -6,21 +6,22 @@
 
 </div>
 
-You need to test an agent before shipping it, and deploy the same version you tested.
+You changed one line of your Copilot agent's prompt. Does it still answer well?
 
-> You write instructions for a release-notes agent.
+> You write a release-notes agent in the Copilot app.
 >
-> Run it against a few example requests in a local test cluster.
+> You add three examples of what a good answer must say and press Enter.
 >
-> When the tests pass, publish that exact package.
->
-> Deploy it to another cluster after reviewing the target and planned changes.
+> One fails because the answer left out a pull request. You fix the prompt and press Enter again.
 
-Kaimahi's `kmx` command-line tool helps developers create, test and deploy
-agents on Kubernetes. It packages the agent, runs test cases and moves that
-package to the selected cluster. It is not an agent runtime.
+**Know your agent works before you share it.** kmx runs your examples in the
+Copilot app, shows what broke and why, compares models and replays tool calls.
+
+[Get started in the Copilot app](docs/copilot-app.md) · [agent.kaimahi.dev](https://agent.kaimahi.dev)
 
 **Status: experimental. Not recommended for production use.**
+
+## Package and deploy to Kubernetes
 
 **Run / Test / Publish:** Run invokes an existing live Orka Agent; Test checks
 workspace cases with `kmx test`; Publish transfers the tested package with
@@ -31,9 +32,6 @@ These docs follow main. `kmx test` and `kmx deploy` are unreleased; v0.8.1 uses
 `kmx eval` and `kmx lift` with the same arguments. See
 [Test compatibility](docs/kmx.md#test-compatibility-unreleased) and
 [Deploy compatibility](docs/kmx.md#deploy-compatibility-unreleased).
-
-[Use kmx in the Copilot app](docs/copilot-app.md) to create an agent, edit its prompt
-and run tests without Kubernetes or Docker.
 
 ## Try it locally
 
@@ -61,17 +59,17 @@ Use a dedicated test environment. See [other install methods, prerequisites and 
 ## Agent files in Copilot
 
 On macOS, use the [plain Copilot plugin](plugins/copilot/README.md#install-on-macos):
-install the rc.3 prerelease darwin binary, register `kmx-plugins`, then install the
+install the rc.4 prerelease darwin binary, register `kmx-plugins`, then install the
 PATH plugin. macOS CI checks installation and
 the offline fake-model loop, not a Copilot model or the desktop app.
 
 ### Windows through WSL
 
 For the Markdown-agent inner loop without a Kubernetes cluster, use the
-[WSL Copilot plugin](plugins/copilot-wsl/README.md). Install the paired v0.9.0-rc.3 prerelease in WSL:
+[WSL Copilot plugin](plugins/copilot-wsl/README.md). Install the paired v0.9.0-rc.4 prerelease in WSL:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/kaimahi-agents/kaimahi/v0.9.0-rc.3/install.sh | sudo sh -s -- --version=v0.9.0-rc.3 --bin-dir=/usr/local/bin
+curl -fsSL https://raw.githubusercontent.com/kaimahi-agents/kaimahi/v0.9.0-rc.4/install.sh | sudo sh -s -- --version=v0.9.0-rc.4 --bin-dir=/usr/local/bin
 ```
 
 Then, in a Windows terminal:
