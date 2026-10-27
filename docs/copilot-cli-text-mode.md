@@ -92,6 +92,14 @@ test IDs and checks as **not run**. Do not call Test unless the user asked to ru
 it. A refused, failed or publication-unknown Edit never becomes a successful
 addition.
 
+Ordinary full-content Edit may retain its submitted source with the returned
+revision only after checking that the source SHA-256 equals that revision. Sparse
+`exampleEdits` are applied by the server to the supplied baseline, so their
+submitted `content` is not the saved source. After a sparse Edit, later editing
+requires a fresh checked complete authoring snapshot for the returned revision;
+without one, chat withholds Edit rather than pairing pre-patch source with the
+post-patch revision.
+
 An explicit model chosen by the user is remembered for that exact agent path in
 the current conversation and supplied on later Run/Test calls. An attributable
 result may confirm the effective provider/model. This choice never rewrites

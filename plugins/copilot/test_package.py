@@ -269,6 +269,9 @@ class PackageTests(unittest.TestCase):
                          "Inconclusive", "showContent: true", "never rerun", "not run"]:
             self.assertIn(required, skill)
         prose = " ".join(skill.split())
+        for required in ["full-content Edit", "exampleEdits", "SHA-256",
+                         "checked complete authoring snapshot", "withhold further edits"]:
+            self.assertIn(required, prose)
         self.assertIn("full scope + `fullPass: true`", prose)
         self.assertIn("`fullPass: false`", prose)
         self.assertIn("Missing, contradictory or unknown fields are not passes.", prose)

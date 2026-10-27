@@ -583,7 +583,10 @@ shell fallback. Shared skills read Run/Test structuredContent, preserve full ver
 subset and fail/unknown/refused/cancelled/error distinctions, and never infer pass
 from tool success. Conversation-local model choice is path-scoped, never source or
 history; answer content requires an explicit request and is never recovered by a
-second send. Give one plain notice before the first hosted-model send;
+second send. Retain submitted source with an Edit result only after its SHA-256
+matches the returned revision; sparse exampleEdits require a fresh checked
+authoring snapshot because the server, not the submitted baseline, creates the
+saved bytes. Give one plain notice before the first hosted-model send;
 ordinary agent-file creation stays confirmation-free, without path-character
 restrictions. Before writing new or changed inline tests in a frontmatter-based
 Copilot file, canvas/MCP shows "Tests added here become part of this agent's

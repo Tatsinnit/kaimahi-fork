@@ -167,9 +167,14 @@ Preserve the prompt, authored model and existing
 tests. Use the stable-string recipe above. Do not run tests unless asked. After a
 confirmed save, say `Added 1 test to <file> (not run):` for one addition or
 `Added <count> tests to <file> (not run):` for multiple additions, then list one
-row per added test with its ID and assertion IDs/types. Retain the exact submitted
-source and returned revision for later same-chat edits. If no save occurred, say
-so; do not claim additions or list them as saved.
+row per added test with its ID and assertion IDs/types. After an ordinary
+full-content Edit, retain the submitted source with the returned revision only
+after verifying its SHA-256 equals that revision. An Edit with `exampleEdits` is
+different: the server patches the baseline source, so its submitted `content` is
+not the saved source. After a sparse Edit, obtain a checked complete authoring
+snapshot for the returned revision before any later Edit; if none is available,
+withhold further edits instead of pairing old source with the new revision. If no
+save occurred, say so; do not claim additions or list them as saved.
 If the user explicitly asks for proposals only, show proposals as tests in chat
 and say they are not saved. A failed Edit is not a completed addition.
 

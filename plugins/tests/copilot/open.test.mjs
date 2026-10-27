@@ -327,6 +327,10 @@ for (const variant of ["copilot-wsl", "copilot"]) test(`${variant} skill help di
   assert.match(builder, /Saved tests \(not run\)/);
   assert.match(builder, /Added 1 test to <file> \(not run\)/);
   assert.match(builder, /Added <count> tests to <file> \(not run\)/);
+  assert.match(builder, /After an ordinary\s+full-content Edit/);
+  assert.match(builder, /Edit with `exampleEdits`/);
+  assert.match(builder, /obtain a checked complete authoring\s+snapshot/);
+  assert.match(builder, /withhold further edits/);
   for (const marker of ["structuredContent", "Full pass", "Partial pass", "Inconclusive", "Refused", "Cancelled", "Did not finish", "showContent: true", "never rerun"]) assert.ok(builder.includes(marker), marker);
 });
 
