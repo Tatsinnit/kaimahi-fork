@@ -252,10 +252,10 @@ class SourceReleaseTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
 
     def test_release_requires_semantic_provider_registration_contract(self):
-        workflow = (HERE.parents[1] / ".github/workflows/release.yml").read_text()
+        workflow = (HERE.parents[1] / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("run: node --test plugins/tests/copilot/*.test.mjs", workflow)
         self.assertIn("needs: [release, plugin-install, release-contracts, release-windows-amd64]", workflow)
-        opener = (HERE.parents[1] / "plugins/tests/copilot/open.test.mjs").read_text()
+        opener = (HERE.parents[1] / "plugins/tests/copilot/open.test.mjs").read_text(encoding="utf-8")
         self.assertIn("actual ${variant} extension opens its own provider", opener)
 
     def test_generated_failure_wording_module_is_checked_and_regenerated(self):
