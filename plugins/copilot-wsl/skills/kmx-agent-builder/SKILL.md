@@ -148,7 +148,11 @@ Test retention metadata contains only opaque diagnostic IDs, not failure content
 `retention.status: not_requested` means no file diagnostic retention was requested;
 it is not proof that no cleartext preview journal exists.
 Explain is not an MCP tool; file diagnostics are inspected offline through the
-CLI with the exact file path.
+CLI with the exact file path. `kmx test FILE` selects its default companion or
+an explicit `--tests FILE`; this plugin's MCP operations stay single-source and
+refuse a present default companion. `kmx package test` is native workspace
+evaluation, not this preview.
+Keep using this plugin's MCP Run/Test calls for chat requests.
 
 ## Tests in Copilot-format files
 

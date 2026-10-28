@@ -1,13 +1,88 @@
 # Local preview
 
+## CLI storage, privacy and evidence caveats
+
+This is the shared caveats page linked by file Run, Test and Explain help.
+File previews on fake, local and Copilot models use embedded Agent Sessions.
+They retain instructions, inputs, answers, judge payloads and reasoning in
+cleartext SQLite journals under the kmx state directory (`KMX_HOME` when set),
+in `local-preview/journals`. The journal is never suite evidence or permission
+to publish or deploy. Copilot content checks stay provider-owned and run before
+journaling. Replay makes zero model calls; it is inspection, not a new test.
+
+Journal retention keeps the newest 20 runs at each start; active runs are kept
+and concurrent starts can leave more. Stop previews before removing journal
+files there to clear retained content. See [retention and clearing](#journal-retention-and-clearing)
+for private-file, active-run and platform boundaries; no new cleanup CLI is implied.
+
+Completed non-pass Test examples also retain bounded diagnostics under
+`eval-failures` (last 10 per resolved file subject across revisions).
+Use `kmx test explain --file FILE` to inspect them offline; `--show-content`
+opts into bounded excerpts, and `--clear` clears one ID or that file subject.
+The stores are independent: deleting journals does not clear failure diagnostics,
+and clearing failure diagnostics does not delete journals, source history or
+passing proof. See [retained Test failures](#retained-test-failures) for scope,
+revision attribution, bounds and retention-unavailable behavior.
+
+## Copilot sign-in in CI
+
+The app's sign-in is not the runner's sign-in. Supply your own Copilot-enabled
+GitHub credential as the runner's `COPILOT_GITHUB_TOKEN` environment variable;
+do not put a token in the agent file, command arguments or workflow source.
+In GitHub Actions, store it as a repository or environment secret (named
+`COPILOT_GITHUB_TOKEN` in this example), then expose it only to the test step:
+
+```yaml
+- name: Test with Copilot
+  env:
+    COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+  run: kmx test ./release-notes.agent.md --provider copilot -o json --github-summary
+```
+
+Run after checkout and installation of a current-main binary, with the agent's
+model set to an exact enabled ID or an explicit `--model ID`. The default
+non-fake route is Copilot; the explicit provider above makes the CI choice clear.
+The workflow-provided `GITHUB_TOKEN` is not a substitute for a credential with
+Copilot model access. Do not print or echo the secret. No interactive login or
+keychain setup is needed when a valid explicit token is supplied. Missing,
+invalid or refused credentials stop execution; kmx never switches credentials
+after an invalid explicit token. See [credential precedence](kmx.md#copilot-model-access).
+
+Use `kmx test FILE -o json --github-summary` to gate on all saved tests.
+Exit 0 means pass, 1 means assertion failure, 2 means it could not run or decide,
+and 130 means cancelled; flag-parsing and output/summary-write failures also exit 1.
+A case filter is always partial. `--no-content` omits answers and failure operands
+from JSON; the step summary is content-free regardless. The
+[CI report and artifact example](copilot-app.md#run-the-same-tests-in-ci) preserves
+the test's status while retaining JSON. Keep content-bearing reports private as
+needed. Neither a report nor a green preview is package deployment evidence,
+and the journal and failure-retention rules above still apply on a runner.
+The fake model checks wiring offline; it does not qualify hosted Copilot access.
+
+## Preview execution
+
 `internal/kmx/localpreview` runs one [single-file agent](agent-file.md), tool-free
 by default,
 in the kmx process. Every result is labeled **local preview**. It is not
 deployment qualification, suite evidence, a passing receipt, or authority to
 publish or deploy. `kmx run FILE`, `kmx test FILE` and MCP Run/Test use it for
-fake/local and explicit Copilot routes through the `agentpreview.Runner` interface.
+fake/local and default or explicit Copilot routes through the `agentpreview.Runner` interface.
+CLI `kmx run FILE` executes the saved inputs and returns answers without evaluating
+assertions or setting up a judge. Explicit positional input runs that input; saved
+inputs explicitly selected alongside it keep their own fixtures. Completed Run
+rows are **ANSWERED**, not passing tests; JSON keeps an unknown verdict and
+`fullPass: false`. No judge is selected or authenticated for CLI Run. Test and the
+existing single-source MCP Run/Test behavior continue to evaluate checks. File
+CLI selects a [separate tests file](agent-file.md#tests-in-a-separate-file-reader-only)
+by the shared default rule or `--tests FILE`; its examples never enter the agent's
+prompt. Original/unselected agent content and raw tests prose still undergo the
+same credential preflight. Executed combined revision and saved target/revision
+are separate acknowledgements; tests-only edits stale retained results. Legacy
+MCP/canvas capabilities refuse a present default tests file until their paired
+reader/writer slice lands rather than silently reporting an agent-only result.
+
 Selected examples and optional ad-hoc input share one invocation-owned journal;
-each gets a fresh Session, as does each of the two samples per judge assertion. The adapter aborts later sends on execution or deadline
+each gets a fresh Session, as does each of the two samples when judging is requested. The adapter aborts later sends on execution or deadline
 failure, and only exposes a private journal handle after successful finalization.
 
 **Tool-free Copilot is journaled too.** Its transport performs credential checks
@@ -71,9 +146,9 @@ Name the variable; never put the credential value on the command line.
 ## Host-tool foundation
 
 The optional [Tools declaration](agent-file.md#markdown-contract) names
-`github_list_merged_prs`. File Run/Test accepts explicit `--tool-bindings FILE`
-for one real read-only GitHub MCP operation, without discovery or workspace
-configuration. An unbound name is offered as a bounded unavailable stub answering
+`github_list_merged_prs`. Explicit `--tool-bindings FILE` retains the fixed
+read-only GitHub MCP operation described below. File Run/Test can also select
+named stdio MCP servers from the agent folder's `kmx.yaml` (see below). An unbound name is offered as a bounded unavailable stub answering
 "not available in this test"; it is never silently dropped. Malformed supplied bindings,
 missing live credentials and broken calls still refuse. [Per-test recordings](agent-file.md#per-test-recorded-tools)
 supply saved output without any tool binding. A pending Recorded tool (`calls: []`) captures its first successful
@@ -105,6 +180,123 @@ result keeps its executed revision and separately returns the saved revision; it
 for the new source bytes. No execution retry follows a stale or failed save. There is no general CLI binding-file format; the explicit
 CLI binding below remains the fixed read. Copilot's runtime-owned binding is
 separate and requires no hand-edited file.
+
+### Recorded and unavailable tools in terminal tests
+
+Populated per-test Recorded tools replay their saved results without resolving a
+live host or tool credential. A different tool argument stops the run with a
+recording mismatch; it never falls back to a live call. An empty Recorded entry
+is pending capture, not a saved result. Without a selected live source or app host,
+it stays unavailable and the source file is unchanged.
+
+Text Run/Test reports `No recording; tool unavailable.` beneath each Enabled
+unavailable tool, even if it was not requested. Disabled tools do not show this
+note. JSON keeps the exact `mode`, `source`, `callCount` and `toolSettings`; the
+Actions summary explains displayed unavailable rows without including arguments
+or results.
+
+Calls checks count Enabled requests, including requests to unavailable tools;
+they do not prove successful live execution. A Test can therefore pass a Calls
+check while reporting `source=unavailable`. Inspect the source as well as the
+verdict. Recorded tool replay is offline, but a hosted model or judge still needs
+network access. A fake-model test without judge assertions or live tool sources
+is fully offline. Selecting `fake` does not disable an Enabled live binding;
+`--tool-bindings` or a selected stdio server can still make a network request.
+
+### Selected stdio servers in file Run/Test
+
+Only the file CLI consumes `mcpServers` and `liveToolServers` beside the checked
+agent file. Definitions alone do nothing. The Copilot app and `kmx mcp` keep
+their host-provided tools; these launch keys do not replace that bridge.
+
+Example shape (replace the placeholder command and tool names with your server):
+
+```yaml
+version: 1
+mcpServers:
+  notes:
+    command: /absolute/path/to/your-mcp-server
+    args: []
+    env:
+      AUTH_TOKEN: NOTES_TOKEN  # host environment variable NAME, not its value
+    tools:
+      lookup: search_notes    # declared agent name: exact server tool name
+liveToolServers: [notes]
+```
+
+```sh
+kmx test example.agent.md --mcp-server notes
+kmx run example.agent.md --mcp-server notes --mcp-server another
+kmx test example.agent.md --no-mcp-servers
+```
+
+Repeatable `--mcp-server NAME` **replaces** the saved list. `--no-mcp-servers`
+clears both saved and explicit selections, even if supplied together; it never
+prompts. The fixed `--tool-bindings` path takes precedence if also supplied.
+A selected server starts only for mapped, declared **Enabled** tools needing a
+live source. Disabled, unmapped and unselected tools do not resolve credentials
+or executables. Populated test recordings replay without launch resolution;
+argument mismatch never falls back to live. Ad-hoc input has no per-test fixture
+and may need live tools even when saved tests have recordings.
+
+The working directory is the agent folder. Commands may be absolute paths,
+paths relative to that folder, or executable names resolved through the frozen
+PATH. There is no shell. Only PATH is inherited; HOME, TMPDIR and other needs
+must be explicit named refs in `env`. Configuration and each used env reference
+are frozen before the first launch. Every explicit ref is conservatively
+protected as potentially sensitive at any length; a short value such as `1`
+can conflict with protocol metadata. Path-valued refs such as HOME are protected
+too: arguments and results containing that path are withheld (use executable
+names and folder-relative arguments where appropriate). Use non-secret command
+arguments for ordinary settings rather than weakening credential checks. The
+complete child environment is bounded to 64 entries including PATH: with an
+inherited PATH, at most 63 additional refs fit unless PATH itself is overridden. Missing refs, bad selections,
+startup/protocol/call failures or uncertain cleanup stop completion (exit 2);
+cancellation remains 130. Pending Recorded tools use the existing checked
+capture path only after owner cleanup; a cleanup failure cannot save a capture
+or publish full success.
+
+For fully offline Actions tests, use recorded tools, a fake model and no judge
+assertions or fixed live bindings; fake alone does not disable live sources:
+
+```sh
+kmx test example.agent.md --provider fake --model fake --no-mcp-servers -o json --github-summary
+```
+
+Destination commands ignore only these two launch subtrees after checking YAML
+structure, so args/lists do not break operational config. Aliases, anchors,
+duplicate keys, known credential shapes and existing size bounds still reject;
+only the tool consumer validates launch semantics.
+
+### Stdio host lifecycle
+
+The caller supplies a resolved absolute executable and directory, an explicit
+frozen environment and exact local-to-server tool-name mappings. There is no
+shell, ambient environment inheritance, server discovery, automatic retry or
+credential sign-in. Only mapped tools become trusted definitions. Text results
+project as `text`; structured object results take precedence over accompanying
+text. Binary/resource results and input-required responses cannot complete a
+call. Protocol frames are bounded and checked before SDK decoding; child stderr
+and SDK logs are discarded. The trusted caller identifies credential env keys
+separately from ordinary settings such as `DEBUG=1`; every identified credential
+value is checked exactly, at any length, including decoded protocol metadata.
+Known credential shapes are also rejected in model/journal-bound data. This is
+not a general secret detector or a sandbox. Server-initiated requests and
+notifications are unsupported; they stop the session rather than invoking a
+callback.
+
+Linux, macOS and WSL processes get invocation-owned process groups, pipes and
+bounded kill/reap cleanup; any failed call or cancellation poisons the session.
+A poisoned operation and an uncertain kill/reap have distinct fixed errors; both
+withhold completion, including cleanup failures during startup. The invocation
+must use its outer context, not the runner's shorter-lived resolver context,
+and must check the owner's `Close` before accepting a result. Leader exit is
+observed without reaping before cleanup sends its own kill, so a previously
+killed server cannot pass merely because a descendant holds stdout open.
+Cleanup failure withholds success. Descendants that deliberately escape their group with
+`setsid` are outside this cleanup guarantee. Native Windows tool execution
+remains unavailable. Adapter tests use real owned subprocesses and a scripted
+fake model; they are not qualification of arbitrary servers or hosted models.
 
 ## Folder tool settings
 
@@ -264,6 +456,12 @@ same retention and clear operations below. Native Squad parsing stays tool-free.
 
 ## Model routes
 
+The following describes the standalone preview library. For file CLI use,
+`--model` overrides the authored model, and a non-fake model defaults to Copilot
+with an existing sign-in. Select a local route explicitly with `--provider`
+and `--provider-url`; the CLI [route examples](kmx.md#agent-file-local-preview-unreleased-integration)
+show both. No route is discovered or installed during Run/Test.
+
 Preview chooses the exact runtime picker/tool override, then authored
 `Model.Preferred`, then `gpt-5.6-terra`. An omitted Model remains omitted in the
 source and revision; both runners receive a per-invocation execution copy. The
@@ -316,7 +514,9 @@ does not change a trusted startup provider, endpoint or credential source.
 ## Refusals
 
 The following refuse before any journal file is created or any request is sent.
-Each refusal says what to change:
+Each refusal says what to change. Assertion/judge setup refusals apply when checks
+are evaluated, not to answer-only CLI Run. Source validation and credential/content
+checks still cover the authored assertions even when Run does not evaluate them:
 
 - a non-fake model with no configured endpoint, or `fake` combined with an
   endpoint;
@@ -349,8 +549,10 @@ response bodies, prompts, answers or credentials.
 
 ## Judging
 
-Assertions reuse the existing `contains`, `notContains`, `regex` and
-`llmJudge` semantics. `llmJudge` uses the native two-sample judge through
+Test and the default MCP/library preview path evaluate assertions using the
+existing `contains`, `notContains`, `regex` and `llmJudge` semantics. CLI Run skips
+assertion evaluation, judge selection/authentication and judge sessions, while
+retaining completion attribution, tool evidence and journal-finalization checks. `llmJudge` uses the native two-sample judge through
 `app.LocalPreviewJudge`, so malformed, unavailable, split or inconclusive
 judgments are `unknown`, never a pass. The judge uses the agent's route by
 default, and the request names each assertion's authored `judgeModel`. With

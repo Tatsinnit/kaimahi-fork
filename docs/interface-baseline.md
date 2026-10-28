@@ -15,70 +15,83 @@ version, with one stderr notice and unchanged legacy output/exit contracts. See
 
 ## Installed command tree
 
-Visible product commands:
+Root help shows `create`, `run`, `test`, `chat`, `model`, `package`, `cluster`,
+then `version`, with the tagline “Write, run and test agent files.” The tree below
+expands those visible product commands:
 
 ```text
 kmx
-├── create <name>
+├── create NAME                   (agent file and paired example test)
+├── run [FILE [input]] | --agent <name>
 ├── test [FILE]
-│   ├── cleanup [<run-id>]
-│   ├── diff <before.json> <after.json>
-│   ├── explain [failure-id]
-│   ├── export --member <id> --out <file>
-│   ├── verify --suite <layout-or-digest> --evidence <file> --expect <file>
-│   └── from-sessions <session-uid>...
-├── push [reference]
-├── deploy [<ref>@<digest>]
-├── run [FILE] | --agent <name>
-├── run-profile
-│   └── export FILE
+│   └── explain [failure-id] --file FILE
 ├── chat <name> [message...]
-├── quickstart
-├── status
-├── console
-├── targets
-├── mcp --root <directory>
 ├── model
 │   ├── list [--provider local|copilot] [-o table|json]
 │   ├── login [--gh]
 │   └── logout
-├── context
-│   ├── show
-│   └── use <context>
-├── local
-│   ├── up
-│   └── down
-├── orka
-│   ├── install
-│   ├── status
-│   ├── show <name>
-│   └── list
-├── suite
+├── package
+│   ├── create <name>              (native workspace authoring)
+│   ├── test
+│   │   ├── cleanup [run-id]
+│   │   ├── diff <before.json> <after.json>
+│   │   ├── explain [failure-id]
+│   │   ├── export --member <id> --out <file>
+│   │   ├── verify --suite <layout-or-digest> --evidence <file> --expect <file>
+│   │   └── from-sessions <session-uid>...
+│   ├── push [reference]
+│   ├── deploy [<ref>@<digest>]
+│   ├── status --to <destination>
+│   ├── ctx [--check]
 │   ├── validate <path>
 │   ├── build <directory>
-│   ├── policy <file>
-│   ├── push <directory> <reference>
 │   ├── push-image <archive> <reference>
-│   └── pull <reference>
-├── task
-│   └── result <task>
-├── completion bash|zsh|fish
+│   ├── pull <reference>
+│   ├── policy <file>
+│   ├── suite
+│   │   └── push <directory> <reference>
+│   └── run-profile
+│       └── export FILE
+├── cluster
+│   ├── up
+│   ├── down
+│   ├── status                     (same Orka runtime report as orka status)
+│   ├── context
+│   │   ├── show
+│   │   └── use <context>
+│   ├── quickstart
+│   ├── console
+│   ├── targets
+│   ├── orka
+│   │   ├── install
+│   │   ├── status
+│   │   ├── show <name>
+│   │   └── list
+│   └── task
+│       └── result <task>
 └── version
 ```
 
-`test` is an operational workspace command with offline diff and independent
-read-only reference extraction/export helpers; explicit `test FILE` is a local
-preview whose completed non-pass diagnostics can be explained offline with
-`test explain --file FILE`. Explicit `run FILE` is the corresponding preview Run.
-Cobra also supplies `help`.
-Experimental `suite push-image` publishes a verified OCI image graph, including
+`package test` is an operational workspace command with offline diff and independent
+read-only reference extraction/export helpers; `test FILE` is a local
+preview of one agent file whose completed non-pass diagnostics can be explained offline with
+`test explain --file FILE`. Bare `kmx test` tests direct `*.agent.md` agents in the
+current folder and `.github/agents/` (non-recursive) with one text/JSON/GitHub summary
+reporting failed, unknown and not-run counts; it never falls back to `package test`,
+and `--tests`/`--case` require an explicit FILE. Explicit `run FILE` is the
+corresponding preview Run.
+`kmx mcp --root DIR`, `kmx completion bash|zsh|fish` and `kmx help [TOPIC...]`
+remain operational but are omitted from root help. MCP and Completion are also
+omitted from root completion suggestions; explicit invocation still works.
+Experimental `package push-image` publishes a verified OCI image graph, including
 attestations, independently of deployment admission. Replacing a different tag
-requires `--force`; same-digest publication is a no-op. `suite build --suite-ref`
+requires `--force`; same-digest publication is a no-op. `package build --suite-ref`
 checks complete source content through the shared bounded materializer.
 
-On native Windows, this full command tree remains visible for help/completion but
+On native Windows, the same discovery rules apply. Visibility in help/completion
 is not an enabled capability list. Current `main` permits only version/help/
-completion, package-free fake `run FILE` / `test FILE`, and offline
+completion, package-free fake `run FILE` / `test FILE` (native Windows still
+requires an explicit file), and offline
 `test explain ... --file FILE` (plus the hidden legacy Explain spelling for
 compatibility). Every other route refuses before effects. See the
 [native Windows command boundary](windows.md#supported-native-commands).
@@ -111,8 +124,8 @@ Hidden but callable:
 |---|---|
 | `kmx eval` and `cleanup/diff/explain/export/verify/from-sessions` | Deprecated Test spellings; same arguments/flags/stdout/exit/state, exactly one stderr notice per legacy invocation |
 | `kmx lift [<ref>@<digest>]` | Deprecated deployment spelling; same arguments/flags, one stderr notice, legacy stdout and stderr stage labels retained |
-| `kmx aks up/down` | Guarded AKS compatibility path with historical ownership records |
-| `kmx quickstart-wizard` | Retirement stub directing callers to `quickstart --interactive` |
+| `kmx cluster aks up/down` | Guarded AKS compatibility path with historical ownership records |
+| `kmx cluster quickstart-wizard` | Retirement stub directing callers to `quickstart --interactive` |
 
 Removed outright: `kmx agent`, root `ctx`, `up`, `down`, the former
 AKS-provisioning meaning of root `lift`, and `lift down`. They are not
@@ -132,8 +145,10 @@ Workspace --create/test--> AgentSuite artifact --push--> OCI location
 
 | Command | Primary object | Current effect |
 |---|---|---|
-| `create` | Workspace | Author one offline member; no cluster or model call |
-| `test` | Workspace/prepared AgentSuite | Run full ordered native Orka/kagent cases, or pinned AgentSessions chat with explicit `--development-host FILE` and `--bindings FILE` (`AgentSessionsBinding`); stop later cases after the first non-pass |
+| `create` | Agent file and paired test | Author two files without prompts, model selection or overwrites |
+| `package create` | Workspace | Author one offline member; no cluster or model call |
+| `test [FILE]` | One agent file, or direct agent files in the current folder and `.github/agents/` | With FILE, test that file; bare, one summary over folder agents with failed, unknown and not-run counts, never falling back to `package test` |
+| `package test` | Workspace/prepared AgentSuite | Run full ordered native Orka/kagent cases, or pinned AgentSessions chat with explicit `--development-host FILE` and `--bindings FILE` (`AgentSessionsBinding`); stop later cases after the first non-pass |
 | `test export` | Latest completed exact-suite/member managed proof | Write new detached public evidence offline; captured tagged module/checksum or clean VCS provenance required, no evaluation or private-gate replacement |
 | `run-profile export FILE` | Canonical agent file | Content-bearing frozen JSON on stdout, with source/instruction/model/example hashes and target examples `not_run`; no configuration, execution, evidence, package or deployment authority |
 | `test verify` | Local single-manifest OCI layout + detached evidence + reviewed ExpectedEvaluation | State-free offline CI gate; digest input also requires explicit layout, text/JSON success exits0, coded refusal exits1; no private-gate authority |
@@ -145,7 +160,7 @@ Workspace --create/test--> AgentSuite artifact --push--> OCI location
 
 ## Workspace versus live
 
-Default `create` requires one name and exact model/file-valued instructions.
+`package create` requires one name and exact model/file-valued instructions.
 With visible stdin/stderr terminals, missing inputs prompt; nonterminal use
 requires `--model` and `--instructions`, and explicitly blank flags refuse.
 No model or instructions defaults are inferred. It discovers the nearest `workspace.yaml`; `--workspace DIR`
@@ -153,7 +168,7 @@ selects or initializes one exact root. The current source profile has a
 one-member limit.
 
 Live create/previews/wizard are removed; their flags are unknown before config.
-Root test runs full native authored cases only: Orka uses `--inference`, kagent
+`package test` runs full native authored cases only: Orka uses `--inference`, kagent
 uses `--bindings`; pinned AgentSessions chat instead requires a private
 `--development-host FILE` plus an `AgentSessionsBinding` (`--bindings`), with no
 cluster selectors or fallback. All export only
@@ -170,7 +185,7 @@ Root `run --agent` and supported Orka chat select live Agents by
 context/namespace/name, including suite-owned Agents. They are not workspace-local
 execution or fresh suite evaluation and grant no adoption/update/copy/retirement
 authority. Chat `/lift` and console Deploy only print
-`Deploy moved: kmx deploy <ref>@<digest> --to-context … --evidence …`.
+`Deploy moved: kmx package deploy <ref>@<digest> --to-context … --evidence …`.
 No new GUI or source-less copying. Console Ready means placement, not an answer.
 
 ## Context, environment, target and inference
@@ -178,12 +193,12 @@ No new GUI or source-less copying. Console Ready means placement, not an answer.
 - A **context** is a kubeconfig access selector. KMX does not follow kubectl's
   mutable current-context.
 - An experimental **Environment** is logical setup identity. The setup-only
-  `pkg/kmx.AgentEnvironment` is not wired to `kmx local up`.
+  `pkg/kmx.AgentEnvironment` is not wired to `kmx cluster up`.
 - A **target** is an exact runtime, physical destination and namespace.
 - **Inference** is an independent model route; choosing it does not select a
   runtime.
 
-`kmx targets` is an offline compiled capability report by default. Explicit
+`kmx cluster targets` is an offline compiled capability report by default. Explicit
 probes distinguish present, absent and unreadable; they do not select, install
 or deploy a runtime.
 

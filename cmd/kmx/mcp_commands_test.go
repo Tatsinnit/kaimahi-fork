@@ -331,8 +331,39 @@ func TestMCPCommandSharedOperationParity(t *testing.T) {
 		if err := json.Unmarshal(b, &mcpResult); err != nil {
 			t.Fatal(err)
 		}
-		for _, result := range []any{cliResult, mcpResult} {
+		for index, result := range []any{cliResult, mcpResult} {
 			doc := result.(map[string]any)
+			if index == 0 {
+				if doc["snapshotRevision"] == nil || doc["tests"] == nil {
+					t.Fatal("CLI pair identity missing")
+				}
+				// Paired CLI is additive; legacy MCP still owns a single source.
+				delete(doc, "snapshotRevision")
+				delete(doc, "tests")
+			}
+			// Only CLI Run opts out of checks; MCP Run keeps its checked default.
+			if op == "run" {
+				want := "pass"
+				if index == 0 {
+					want = "unknown"
+				}
+				if doc["verdict"] != want {
+					t.Fatalf("Run mode %d verdict: %+v", index, doc)
+				}
+				for _, key := range []string{"verdict", "reason", "reasonCode"} {
+					delete(doc, key)
+				}
+				for _, row := range doc["examples"].([]any) {
+					ex := row.(map[string]any)
+					checks := ex["assertions"].([]any)
+					if len(checks) != index || ex["verdict"] != want {
+						t.Fatalf("Run mode %d checks: %+v", index, ex)
+					}
+					for _, key := range []string{"assertions", "verdict", "reason", "reasonCode"} {
+						delete(ex, key)
+					}
+				}
+			}
 			duration, ok := doc["durationMs"].(float64)
 			if !ok || duration < 0 {
 				t.Fatalf("missing or invalid total duration: %+v", doc)

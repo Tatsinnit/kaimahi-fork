@@ -34,7 +34,11 @@ subject to [the naming constraints](docs/NAMING.md); claiming a package-manager,
 organization or domain namespace requires maintainer approval for that exact
 artifact.
 
-Root `kmx create NAME` authors one tool-free native workspace member offline,
+Root `kmx create NAME` authors only `NAME.agent.md` and a paired `NAME.agent.test.md`:
+no prompts, config or model calls, and no overwrite (exit 2). Native workspace
+authoring is `kmx package create`.
+
+`kmx package create NAME` authors one tool-free native workspace member offline,
 Orka by default, exact v0.10.3 Go/linux-amd64 kagent or pinned AgentSessions
 chat explicitly. AgentSessions prepare/load/ordinary push and explicit private
 literal-loopback `test --development-host FILE` remain independent of deleted
@@ -55,9 +59,9 @@ AgentSessions shares the same judge and repeat policy. Exact model and
 file-valued instructions are required: terminal create prompts for omitted inputs,
 while nonterminal use requires both flags. Core authoring stays strict;
 create/push share workspace discovery.
-No runtime/model bootstrap belongs in workspace create. Root test registers
+No runtime/model bootstrap belongs in `package create`. Root test registers
 completed exact-suite passing metadata in private managed state; --out is optional.
-Root push requires that proof by default, or explicit --evaluation FILE without
+Package Push requires that proof by default, or explicit --evaluation FILE without
 fallback; --unevaluated retains ordinary publication. Explicit REPO:TAG is preserved,
 while bare push requires saved publishRepository and derives only its tag from S.
 Private Quickstart/console and extracted-directory transfer keep their contracts.
@@ -66,14 +70,14 @@ User `agent.yaml` readers/writers/receipts, `bundle` commands, `create --live`
 including previews/wizard, run bundle mode and `--bundles` flags are removed
 outright. Old Orka/kagent/AgentSessions bundle receipts are unreadable; no migration
 or on-disk/resource deletion. Legacy bundle status and retirement have no
-replacement. Root `status --to NAME` is separate GET-only destination inspection,
+replacement. `package status --to NAME` is separate GET-only destination inspection,
 not suite-source evaluation or a retired-state reader. Preserve public AgentSuite/ToolProvider implementation-bundle graph,
 build/pull/extracted-directory transfer and alpha `pkg/kmx` interfaces.
 
 Quickstart/console use native source → full eval → exact publication → reviewed
 Deploy Apply/Verify. Quickstart then sends a separate fresh answer Task; console
 Ready means placement only. Chat `/lift` and console Deploy only print
-`Deploy moved: kmx deploy <ref>@<digest> --to-context … --evidence …`.
+`Deploy moved: kmx package deploy <ref>@<digest> --to-context … --evidence …`.
 No release GUI/live-copy fallback. Wizard tools/host modes and live tools/inference
 editing are retired; host Foundry/Copilot chat controls remain independent.
 Standalone AKS up/down and internal App.Lift are independent operations.
@@ -199,35 +203,30 @@ also run in the live-test binary, even when `-run` selects another test. Only
 literal `errors.New` and `regexp.MustCompile` setup with verified imports, and
 passive same-file pointer-to-nil type assertions, are permitted.
 
-The separate typed caller guard compares source references with the audited
-`scripts/ci/orka-callers.json` manifest. It catches a selected path calling a new
-unselected object, a new caller of selected code, and new calling declarations
-or closures even in a file already on the boundary. Multi-value initializer
-expressions get separate identities. Named imports in analyzed safe files are
-also pinned, including standard packages whose initialization runs even when a
-preview handler is never called. Static graph walks also
-catch selected-to-selected changes that extend an existing boundary reference in either
-direction. Methods, function values, fields and same-package private references
-are resolved with Go types, not names guessed from source text.
+The typed caller guard requires review only when selected code reaches a new
+unselected package, using package approvals in `scripts/ci/orka-callers.json`.
+Go types distinguish selected and unselected definitions, including in mixed
+packages such as `internal/kmx/app`. An approved package permits new objects,
+files, helpers and callers within that dependency without manifest edits;
+it does not detect same-package method rebinding. Unselected callers of
+selected code are not pinned. Calls between selected files and ordinary imports
+need no entries. Only `expvar` and `net/http/pprof` imports are pinned: both
+register handlers on the shared default HTTP mux at package initialization.
 
-The guard targets the qualifier's Linux/amd64 build without race/custom tags,
-includes App tests linked into that binary, and excludes other packages' tests.
-It compiles export metadata but never executes initializers or tests. Missing,
-stale or malformed manifests, unresolved definitions, unsupported owned CGO,
-source-file aliases and nested modules fail closed. Owned source containing
-`//line` or `/*line` directives is rejected so adjusted positions cannot relabel
-callers or imported definitions as another routing path. Existing init checks still
-inspect all build tags. This is a conservative source-reference tripwire, not a
-proof of dynamic dispatch, value flow or arbitrary Go effects, and not a sandbox.
+The guard analyzes Linux/amd64 without race/custom tags, including linked App
+tests but not other packages' tests; it never executes the analyzed code.
+Malformed approvals, unresolved definitions, owned CGO, source aliases, nested
+modules and owned `//line` or `/*line` directives fail closed. The separate
+init check still covers all build tags. These are source-reference tripwires,
+not proofs of dynamic dispatch, arbitrary external effects or isolation.
 
-For an intentional boundary change, inspect the output of
-`go run scripts/ci/orka-callers.go --audit` and review the affected callers before
-updating the manifest;
-hygiene never refreshes it automatically. Remove obsolete entries too.
-Both boundary helpers
-have dedicated negative/positive fixtures rather than top-level checker mutation
-discovery. Expanding the guard-only selections requires reviewed evidence and
-boundary tests.
+For an intentional new package dependency, inspect
+`go run scripts/ci/orka-callers.go --audit` and review the affected code before
+updating the manifest. Hygiene never refreshes approvals automatically.
+Removing a reference needs no update; its approval persists for reintroduction
+until explicitly pruned with the audit output. Both guards have dedicated
+positive/negative fixtures. Expanding guard selections needs reviewed evidence
+and boundary tests.
 
 One Go module contains the root CLI (`cmd/kmx`, `internal/kmx`), concrete
 read-only suite member recipe view (`pkg/suiteview`) and alpha application

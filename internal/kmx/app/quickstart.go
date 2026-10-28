@@ -17,7 +17,7 @@ import (
 // quickstart deploys one known bundle and then asks THAT agent the question.
 // A name that could differ from the thing being deployed would let the
 // command answer about something it did not create. Authoring your own is
-// offline `kmx create`; asking any agent anything is `kmx chat`.
+// offline `kmx package create`; asking any agent anything is `kmx chat`.
 const QuickstartAgent = "hello-world-agent"
 
 // QuickstartOptions configure the shortest path to a first answer.
@@ -67,7 +67,7 @@ type quickstartStep struct {
 // Quickstart is the whole distance from a machine with a container engine to
 // an agent answering a question, in one command.
 //
-// It is not a new journey. Every step is `kmx local up`'s, in `kmx local up`'s order,
+// It is not a new journey. Every step is `kmx cluster up`'s, in `kmx cluster up`'s order,
 // with the same waits and the same fail-closed checks — what it ADDS is the
 // one thing `local up` deliberately does not: a fixed Orka Agent and a question
 // put to it. The runtime is Orka; nothing on this path installs, reads or
@@ -77,7 +77,7 @@ type quickstartStep struct {
 // picker and no prompt: the same command on the same machine produces the
 // same cluster, the same Provider and the same Agent, which is what lets an
 // unattended caller rerun it and compare. Choosing your own model and
-// authoring your own agent is `kmx quickstart --interactive`.
+// authoring your own agent is `kmx cluster quickstart --interactive`.
 //
 // This command does not enable governance; existing governance may survive
 // a rerun and is not assessed here.
@@ -122,7 +122,7 @@ func (a *App) Quickstart(opt QuickstartOptions) error {
 		toolchain.Report(a.Err, a.provisioned)
 	}
 
-	if err := a.GuardCreateIn("create a local cluster and a first agent", a.operationCommand("quickstart"), OrkaPathNamespaces); err != nil {
+	if err := a.GuardCreateIn("create a local cluster and a first agent", a.operationCommand("cluster", "quickstart"), OrkaPathNamespaces); err != nil {
 		return err
 	}
 
@@ -200,7 +200,7 @@ func (a *App) quickstartResult(question, answer string, started time.Time) Quick
 
 // quickstartCreateOptions is the one bundle quickstart deploys.
 //
-// The Provider reuses the placeholder key `kmx orka install` already wrote
+// The Provider reuses the placeholder key `kmx cluster orka install` already wrote
 // for its own keyless Provider rather than minting a second one: the
 // in-cluster endpoint needs no credential, and Orka's Provider schema
 // requires a secretRef whether or not the endpoint reads it.
@@ -225,12 +225,12 @@ func (a *App) quickstartFollowups() []string {
 	return []string{
 		a.operationCommand("chat", QuickstartAgent, "--runtime", "orka", "--namespace", OrkaNamespace, "ask it something else"),
 		a.operationCommand("create", "--help"),
-		a.operationCommand("orka", "status"),
+		a.operationCommand("cluster", "orka", "status"),
 	}
 }
 
 func (a *App) quickstartNext(ui cliui.Output, result QuickstartResult) {
-	down := a.operationCommand("local", "down")
+	down := a.operationCommand("cluster", "down")
 	if ui.Rich() {
 		a.notef("\n%s", ui.Actions("Next", []cliui.Action{
 			{Label: "Ask another question", Command: result.Next[0]},
@@ -268,7 +268,7 @@ func (a *App) commandExecutable() string {
 func (a *App) operationCommand(args ...string) string {
 	executable := a.commandExecutable()
 	parts := []string{shellArg(executable), "--context", shellArg(a.Cfg.KubeContext)}
-	if len(args) > 0 && (args[0] == "local" || args[0] == "up" || args[0] == "plane" || args[0] == "down") {
+	if len(args) > 1 && args[0] == "cluster" && (args[1] == "up" || args[1] == "down") {
 		parts = append([]string{"KIND_CLUSTER=" + shellArg(a.Cfg.KindCluster), "CONTAINER_ENGINE=" + shellArg(a.Cfg.ContainerEngine)}, parts...)
 	}
 	for _, arg := range args {

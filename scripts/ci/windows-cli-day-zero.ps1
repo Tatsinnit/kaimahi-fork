@@ -161,10 +161,11 @@ try {
     $run = Invoke-Kmx -CommandArgs @('run', $agent, '--prompt', 'Grace', '--output', 'json')
     $runJSON = $run.Stdout | ConvertFrom-Json -Depth 20
     Assert-Contract ($runJSON.schemaVersion -eq 1 -and $runJSON.kind -ceq 'kmx.agent-file-preview') 'Run JSON schema contract changed.'
-    Assert-Contract ($runJSON.operation -ceq 'run' -and $runJSON.state -ceq 'complete' -and $runJSON.verdict -ceq 'pass' -and $runJSON.fullPass -eq $true -and $runJSON.reasonCode -ceq 'checks_passed') 'Run JSON outcome contract changed.'
+    Assert-Contract ($runJSON.operation -ceq 'run' -and $runJSON.state -ceq 'complete' -and $runJSON.verdict -ceq 'unknown' -and $runJSON.fullPass -eq $false -and $runJSON.reasonCode -ceq 'completion_ready') 'Run JSON outcome contract changed.'
     Assert-Contract ($runJSON.modelRoute.provider -ceq 'fake' -and $runJSON.modelRoute.model -ceq 'fake') 'Run did not use the offline fake route.'
     Assert-Contract ($runJSON.selection.scope -ceq 'full' -and $runJSON.selection.totalCases -eq 1 -and @($runJSON.selection.caseIds).Count -eq 1 -and $runJSON.selection.caseIds[0] -ceq 'greeting') 'Run selection contract changed.'
     Assert-Contract ($runJSON.adHoc.state -ceq 'complete' -and $runJSON.adHoc.answer -ceq 'Hello, Grace') 'Run ad-hoc answer contract changed.'
+    Assert-Contract (@($runJSON.examples).Count -eq 1 -and $runJSON.examples[0].state -ceq 'complete' -and $runJSON.examples[0].verdict -ceq 'unknown' -and @($runJSON.examples[0].assertions).Count -eq 0) 'Run unexpectedly evaluated checks.'
     Assert-Contract ($runJSON.retention.status -ceq 'not_requested') 'Run unexpectedly requested failure retention.'
 
     $source = [Text.Encoding]::UTF8.GetString($fixtureBytes)
@@ -201,7 +202,7 @@ try {
     $deferredHome = Join-Path $root "deferred state $nonAscii"
     $deferredWorkspace = Join-Path $root "deferred workspace $nonAscii"
     [Environment]::SetEnvironmentVariable('KMX_HOME', $deferredHome, 'Process')
-    $deferred = Invoke-Kmx -CommandArgs @('create', 'deferred-greeter', '--workspace', $deferredWorkspace) -ExpectedExitCodes @(1)
+    $deferred = Invoke-Kmx -CommandArgs @('package', 'create', 'deferred-greeter', '--workspace', $deferredWorkspace) -ExpectedExitCodes @(1)
     Assert-Contract ([string]::IsNullOrWhiteSpace($deferred.Stdout)) 'Deferred command wrote ordinary output before refusal.'
     Assert-Contract ($deferred.Stderr -match '(?i)(not available|unsupported|refus)') 'Deferred command did not report an operation refusal.'
     Assert-Contract (-not (Test-Path -LiteralPath $deferredHome) -and -not (Test-Path -LiteralPath $deferredWorkspace)) 'Deferred command created state before refusal.'

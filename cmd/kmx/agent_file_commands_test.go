@@ -34,13 +34,21 @@ func (f *cliPreviewFake) Run(ctx context.Context, r agentpreview.Request) (agent
 	f.deadline, _ = ctx.Deadline()
 	f.calls++
 	f.request = r
+	if r.ValidateSource != nil && f.cause == nil {
+		if err := r.ValidateSource(ctx); err != nil {
+			return agentpreview.Outcome{State: agentpreview.Failed}, agentpreview.ErrSourceChanged
+		}
+	}
 	if r.BeforeExecute != nil && f.cause == nil {
 		if err := r.BeforeExecute(); err != nil {
 			return agentpreview.Outcome{State: agentpreview.Failed}, errors.Join(agentpreview.ErrDiagnosticsFailed, err)
 		}
 	}
 	complete := func(id string) agentpreview.Completion {
-		return agentpreview.Completion{State: agentpreview.Complete, ID: id, FileRevision: r.Agent.Revision, Provider: r.Route.Provider, Model: r.Route.Model, Answer: "PRIVATE ANSWER"}
+		if f.cause != nil {
+			return agentpreview.Completion{State: agentpreview.NotRun}
+		}
+		return agentpreview.Completion{State: agentpreview.Complete, ID: id, FileRevision: r.Agent.Revision, SnapshotRevision: r.SnapshotRevision, Provider: r.Route.Provider, Model: r.Route.Model, Answer: "PRIVATE ANSWER"}
 	}
 	o := agentpreview.Outcome{State: agentpreview.Complete, Journal: "private-handle"}
 	if r.Input != nil {
@@ -50,6 +58,9 @@ func (f *cliPreviewFake) Run(ctx context.Context, r agentpreview.Request) (agent
 	for _, e := range r.Examples {
 		row := agentpreview.ExampleOutcome{ID: e.ID, Completion: complete(e.ID)}
 		for _, a := range e.Assertions {
+			if r.SkipAssertions {
+				break
+			}
 			row.Assertions = append(row.Assertions, runtime.EvaluationAssertionResult{ID: a.ID, Type: a.Type, DefinitionDigest: runtime.EvaluationAssertionDigest(a), Verdict: f.verdict, Reason: "PRIVATE REASON"})
 		}
 		o.Examples = append(o.Examples, row)
@@ -100,7 +111,11 @@ func TestFileCommandsAgainstRunnerInterface(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &r); err != nil {
 				t.Fatal(err)
 			}
-			if r.FullPass || r.Selection.Scope != "subset" || r.Verdict != runtime.EvaluationPass || r.Operation != op {
+			wantVerdict := runtime.EvaluationPass
+			if op == "run" {
+				wantVerdict = runtime.EvaluationUnknown
+			}
+			if r.FullPass || r.Selection.Scope != "subset" || r.Verdict != wantVerdict || r.Operation != op || f.request.SkipAssertions != (op == "run") {
 				t.Fatalf("%+v", r)
 			}
 			if (r.AdHoc != nil) != (op == "run") {
@@ -144,7 +159,7 @@ func TestFileCommandsCopilotRoute(t *testing.T) {
 					t.Fatalf("route=%+v err=%v calls=%d config=%d", runner.request.Route, err, runner.calls, *loads)
 				}
 				var result app.FilePreviewResult
-				if err := json.Unmarshal(out.Bytes(), &result); err != nil || !result.FullPass {
+				if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.FullPass != (operation == "test") {
 					t.Fatalf("invalid JSON result: %s / %v", out.String(), err)
 				}
 			})
@@ -280,7 +295,6 @@ func TestFileCommandGitHubSummaryRefusesBeforeExecution(t *testing.T) {
 		{"missing environment", []string{"test", "FILE", "-o", "json", "--github-summary"}, ""},
 		{"relative environment", []string{"test", "FILE", "-o", "json", "--github-summary"}, "summary.md"},
 		{"requires json", []string{"test", "FILE", "--github-summary"}, filepath.Join(t.TempDir(), "unused.md")},
-		{"requires file", []string{"test", "--github-summary", "-o", "json"}, filepath.Join(t.TempDir(), "unused.md")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			file := cliPreviewFile(t)
@@ -426,7 +440,6 @@ func TestFileCommandsRefuseMixedModesBeforeConfig(t *testing.T) {
 		{"test", "--case", "greeting"},
 		{"run", "--agent", "live", "--prompt", "x", "--case", "greeting"},
 		{"run", "--agent", "live", "--prompt", "x", "--verbose"},
-		{"test", "--verbose"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			path := cliPreviewFile(t)
@@ -481,7 +494,8 @@ func TestFileCommandJournaledPreviewDemo(t *testing.T) {
 			if decodeErr := json.Unmarshal(out.Bytes(), &r); decodeErr != nil {
 				t.Fatal(decodeErr)
 			}
-			if (err != nil) != broken || r.FullPass == broken || strings.Contains(r.Runner, "no journal") || *loads != 0 {
+			wantFail := op == "test" && broken
+			if (err != nil) != wantFail || r.FullPass != (op == "test" && !broken) || strings.Contains(r.Runner, "no journal") || *loads != 0 {
 				t.Fatalf("broken=%v: %+v / %v", broken, r, err)
 			}
 		}
@@ -524,7 +538,7 @@ func TestFilePreviewVerboseStderrOnly(t *testing.T) {
 					t.Fatal(err)
 				}
 				var result app.FilePreviewResult
-				if err := json.Unmarshal(out.Bytes(), &result); err != nil || !result.FullPass || *loads != 0 {
+				if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.FullPass != (op == "test") || *loads != 0 {
 					t.Fatalf("invalid result: %v / %s; config=%d", err, out.String(), *loads)
 				}
 				if verbose {
@@ -615,19 +629,32 @@ func TestFileHelpIsCanonicalOnly(t *testing.T) {
 						t.Errorf("legacy help changed: missing %q", help)
 					}
 				}
-			} else if !strings.Contains(strings.ToLower(out.String()), verb+" file") || !strings.Contains(out.String(), "--case") {
+			} else if !strings.Contains(strings.ToLower(out.String()), map[string]string{"run": "run file", "test": "test [file]"}[verb]) || !strings.Contains(out.String(), "--case") {
 				t.Fatalf("canonical file preview missing from %s help: %s", verb, out.String())
 			}
 			if verb != "eval" {
+				if strings.Count(out.String(), previewCaveatsURL) != 1 {
+					t.Error("help must link the preview caveats once")
+				}
+				data, err := os.ReadFile("../../docs/local-preview.md")
+				if err != nil {
+					t.Fatal(err)
+				}
+				caveats := strings.Join(strings.Fields(string(data)), " ")
 				for _, disclosure := range []string{"cleartext SQLite journals", "local-preview/journals", "newest 20 runs", "active runs", "Stop previews", "fake, local and Copilot models", "embedded Agent Sessions", "judge payloads and reasoning", "provider-owned", "before journaling", "Replay makes zero model calls"} {
-					if !strings.Contains(out.String(), disclosure) {
-						t.Errorf("%s help omits retention disclosure %q", verb, disclosure)
+					if !strings.Contains(caveats, disclosure) {
+						t.Errorf("linked caveats omit disclosure %q", disclosure)
 					}
 				}
 				if verb == "test" {
-					for _, disclosure := range []string{"eval-failures", "last 10 per resolved file subject", "test explain --file FILE", "deleting journals does not clear failure diagnostics", "--github-summary", "GITHUB_STEP_SUMMARY"} {
+					for _, disclosure := range []string{"eval-failures", "last 10 per resolved file subject", "deleting journals does not clear failure diagnostics"} {
+						if !strings.Contains(caveats, disclosure) {
+							t.Errorf("linked caveats omit file-failure disclosure %q", disclosure)
+						}
+					}
+					for _, disclosure := range []string{"test explain --file FILE", "--github-summary", "GITHUB_STEP_SUMMARY"} {
 						if !strings.Contains(out.String(), disclosure) {
-							t.Errorf("test help omits file-failure disclosure %q", disclosure)
+							t.Errorf("test help omits %q", disclosure)
 						}
 					}
 				}

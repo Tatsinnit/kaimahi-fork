@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentfile"
 	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentpreview"
 	kmxsuite "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite"
 	agentkitbuilder "github.com/kaimahi-agents/kaimahi/internal/kmx/agentsuite/agentkit"
@@ -40,7 +41,7 @@ type dependencies struct {
 
 func productionDependencies() dependencies {
 	return dependencies{
-		fileRunner: app.NewLocalFileRunner(),
+		fileRunner: newFileMCPRunner(app.NewLocalFileRunner()),
 		stdin:      os.Stdin, stdout: os.Stdout, stderr: os.Stderr,
 		executable:        invocationExecutable(os.Args[0]),
 		goos:              runtime.GOOS,
@@ -73,6 +74,7 @@ type commandState struct {
 	app                 *app.App
 	argv                []string
 	evalNoticeShown     bool
+	windowsFilePair     *agentfile.Pair
 }
 
 func (s *commandState) executable() string {
@@ -132,7 +134,7 @@ func execute(argv []string, deps dependencies) error {
 			// refusal, but still disclose a recognizable legacy invocation.
 			notice := ""
 			if legacyCommandInvocation(original, "lift") {
-				notice = "kmx lift is deprecated; use kmx deploy (same arguments)."
+				notice = "kmx lift is deprecated; use kmx package deploy (same arguments)."
 			} else if legacyCommandInvocation(original, "eval") {
 				notice = evalDeprecationNotice
 			}
@@ -152,10 +154,17 @@ func execute(argv []string, deps dependencies) error {
 	root := newRootCommand(state)
 	root.InitDefaultHelpCmd()
 	help, _, _ := root.Find([]string{"help"})
+	help.Hidden = true
 	// Cobra otherwise reports an unknown help topic on stdout but exits zero.
 	help.Args = func(cmd *cobra.Command, args []string) error {
-		if len(args) > 0 && args[0] == "agent" {
-			return fmt.Errorf("unknown command %q for %q", args[0], root.Name())
+		if len(args) > 0 {
+			topic, remaining, err := root.Find(args)
+			if err != nil {
+				return err
+			}
+			if len(remaining) != 0 {
+				return fmt.Errorf("unknown help topic %q for %q", strings.Join(args, " "), topic.CommandPath())
+			}
 		}
 		if legacyCommandInvocation(argv, "eval") {
 			return state.noticeLegacyEval(cmd)
@@ -168,7 +177,10 @@ func execute(argv []string, deps dependencies) error {
 		if legacyCommandInvocation(argv, "eval") {
 			return errors.Join(state.noticeLegacyEval(cmd), err)
 		}
-		return err
+		if legacyCommandInvocation(argv, "lift") {
+			return err
+		}
+		return flagErrorWithHelp(cmd, state, err)
 	})
 	root.SetArgs(argv)
 	return root.Execute()
@@ -203,7 +215,7 @@ func legacyCommandInvocation(argv []string, verb string) bool {
 func newRootCommand(state *commandState) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "kmx",
-		Short: "Create and run agents on Kubernetes",
+		Short: "Write, run and test agent files.",
 		// Leave Args unset so Cobra rejects unknown roots before parsing their
 		// flags or honoring --help. Bare root still runs the help handler.
 		SilenceErrors: true,
@@ -213,20 +225,18 @@ func newRootCommand(state *commandState) *cobra.Command {
 	root.SetOut(state.deps.stdout)
 	root.SetErr(state.deps.stderr)
 	root.CompletionOptions.DisableDefaultCmd = true
-	root.PersistentFlags().String("context", "", "act on this kube context for one command (may appear anywhere)")
-	root.PersistentFlags().StringVar(&state.containerEngineFlag, "container-engine", "", "kind container engine: docker or podman (overrides CONTAINER_ENGINE)")
+	root.PersistentFlags().String("context", "", "Kubernetes context for live/cluster operations")
+	root.PersistentFlags().StringVar(&state.containerEngineFlag, "container-engine", "", "kind engine: docker or podman")
 	root.PersistentPreRunE = validateContainerEngineFlag
 	_ = root.RegisterFlagCompletionFunc("context", completeContexts)
 	_ = root.RegisterFlagCompletionFunc("container-engine", staticCompletion([]string{"docker", "podman"}))
 	root.AddCommand(
-		newVersionCommand(state), newMCPCommand(state), newCompletionCommand(root), newModelCommand(state), newContextCommand(state), newLocalCommand(state), newDestinationsCommand(state),
-		newQuickstartCommand(state), newAKSCommand(state),
-		newConsoleCommand(state), newOrkaCommand(state),
-		newStatusCommand(state), newAgentCreateCommand(state), newAgentChatCommand(state), newAgentRunCommand(state),
-		newAgentTestCommand(state), newAgentEvalCommand(state), newReleaseDeployCommand(state), newReleaseLiftCommand(state), newTaskCommand(state),
-		newSuiteCommand(state), newSuitePushCommand(state, true), newTargetsCommand(state), newRunProfileCommand(state),
-		retiredCommand("quickstart-wizard", "kmx quickstart --interactive"),
+		newVersionCommand(state), newMCPCommand(state), newCompletionCommand(root), newModelCommand(state),
+		newFileCreateCommand(state), newAgentChatCommand(state), newAgentRunCommand(state),
+		newAgentTestCommand(state), newAgentEvalCommand(state), newReleaseLiftCommand(state),
+		newClusterCommand(state), newPackageCommand(state),
 	)
+	configureCommandHelp(root, state)
 	installPlatformGate(root, state)
 	return root
 }

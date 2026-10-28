@@ -58,8 +58,161 @@ uses `acknowledgeCopilotTests: true` only after the user agrees to that warning;
 MCP Run/Test also requires this acknowledgment before capturing pending tool
 recordings into a Copilot file's tests (replay-only runs do not write);
 without acknowledgment it reports `confirmation_required` and does not write.
-Prompt-only edits retaining identical tests do not ask again. Separate test files
-are not supported here.
+Prompt-only edits retaining identical tests do not ask again. Existing MCP/canvas
+inline authoring keeps this rule; paired CLI recording writes only the tests file.
+
+<a id="tests-in-a-separate-file-reader-only"></a>
+
+## Tests in a separate file (CLI)
+
+`kmx run FILE` and `kmx test FILE` read the selected tests file with the shared
+reader. Run returns answers without checks; Test evaluates the checks. Add
+`--tests FILE` to select an override, or use `run FILE "input"` for only that
+input. No source migration is automatic. A missing or empty test source is not
+a passing Test.
+
+MCP/canvas pair capabilities and writers are a later slice. Existing MCP reads,
+Run/Test and Edit refuse an agent-only view when its default tests file exists;
+they do not ignore that file, report an old agent-only pass as current, or fall
+back to inline writes. Native Squad and single-source files remain supported.
+
+The tests file is `NAME.agent.test.md` beside `NAME.agent.md`. An agent directly
+inside `.github/agents/` instead pairs with `.github/agent-tests/NAME.agent.test.md`.
+The resolver does not search for a Git root or other candidates. A caller may
+select one explicit tests file instead; it replaces, rather than combines with,
+the default selection. Native Squad `charter.md` files have no default tests file.
+
+The tests source starts with version frontmatter, followed by Markdown prose and
+one `yaml agent-test` fence per test, opening at column 1 (not inside a list or
+blockquote). For example:
+
+````markdown
+---
+schemaVersion: 1
+---
+
+# greeter tests
+
+```yaml agent-test
+id: greeting
+input: Ada
+assertions:
+  - id: greeting-text
+    type: contains
+    value: Ada
+```
+````
+
+Only `schemaVersion: 1` is supported in this frontmatter. Each fence contains one
+mapping using the existing `id`, inline `input`, `assertions` and optional
+`mocks.tools` fields. The [assertion semantics](#examples-and-assertions),
+[explicit tool modes](#per-test-recorded-tools), limits and credential checks are
+unchanged. Tool checks and mock names must match the agent's declared tools.
+IDs are unique across the tests file, and node/case limits apply across fences,
+not separately to each fence. A valid header without test fences means zero tests,
+distinct from a missing tests file; neither is a passing test result.
+Unknown/duplicate fields, YAML aliases/anchors, reserved fence-label lookalikes,
+unclosed fences and HTML comments outside code fences refuse. Other fenced prose
+is not a test. This is a source-format scanner, not a CommonMark/HTML renderer;
+HTML display and collapsing do not define which cases are selected. Original bytes
+and source locations are retained, not rewritten.
+
+`LoadPair` applies the existing CLI-style checked read boundary to both sources.
+A missing default file or parent records absence; an invalid existing path is an
+error. A missing explicit selection is an error, never a fallback. A structured
+inline Examples section (even `examples: []`) and a default tests file
+conflict; an explicit tests-file selection deliberately overrides inline tests
+without changing the original agent bytes.
+
+The combined revision binds both selected file paths, source state and exact
+byte revisions; the agent's own revision remains its raw agent-byte hash.
+Changing only the tests, their presence or their path changes the combined
+revision. Default and explicit selection of the same path have the same combined
+revision; another path with identical bytes does not.
+
+`SameSourceVersion` also checks whether either file or its parent directory
+changed, even when the combined revision is unchanged. Directory timestamp
+changes can conservatively invalidate this check without changing either file.
+Pure `ComposePair` values cannot claim a checked file version. These cooperative
+checks are not an atomic two-file transaction, a hostile-filesystem sandbox or
+write permission. The reader keeps separate tests out of the agent's prompt.
+
+CLI JSON keeps `file.revision` as the raw agent hash and adds `snapshotRevision`
+and selected `tests` metadata. Capturing a pending Recorded tool patches only its
+actual source after journal close: separate tests for paired storage, the agent
+for legacy inline storage. The result remains bound to the executed snapshot;
+`recordingTarget`, raw `savedRevision` and `savedSnapshotRevision` acknowledge the
+save separately. Cancellation, journal failure or source change saves nothing;
+a refused tests save never falls back to the agent. Comments, prose, line endings
+and unrelated numeric lexemes remain unchanged. CLI adds no source history.
+
+`kmx test explain --file FILE [--tests FILE]` compares retained failures with the
+current selection. Tests-only edits and a different identical-content override
+make the old result historical without changing the raw agent revision. After a
+downgrade, older binaries may report the retained store unavailable on encountering
+new pair metadata; use this version or newer to read it. No records are migrated
+or removed automatically. Put journal/summary files outside the checked source parent when possible: creating
+entries there can conservatively stale source-version checks.
+
+## Test a folder
+
+Bare `kmx test` selects direct `*.agent.md` entries in the current folder and
+`.github/agents/`, sorted by path, without recursion or Git-root discovery.
+Each agent uses the same companion rule above. Tests files and agents in other
+subfolders are not selected. Missing optional folders are fine; unreadable or
+invalid folders are reported rather than silently treated as empty.
+Matching unsafe files are refused by the existing checked reader.
+
+```sh
+kmx test
+kmx test -o json --no-content --github-summary
+kmx test greeter.agent.md --tests selected-tests.md --case greeting
+```
+
+`--tests` and `--case` require an explicit agent FILE, even if the folder contains
+exactly one agent. Route/model, tool-server selection, `--no-content` and verbose
+options apply to each selected file. Native workspace evaluation stays at
+`kmx package test`; bare Test never falls back to it. Native Windows still
+requires an explicit file through its guarded fake/tool-free path.
+
+Each file gets its own checked pair, journal and five-minute execution budget.
+This is not one atomic folder snapshot. Assertion failures, completed inconclusive
+checks and invalid/missing/empty tests do not prevent the next file from being
+checked. Execution, route/auth, journal, source and other operational failures
+abort later execution; remaining selected files are explicitly `not_run`, not
+passing. This also includes invalid tool settings, unavailable tools/models,
+recording mismatches or missing recordings, and runner content refusals
+(`unsafe_tool_content` or `credential_content`). Load-time parser refusals,
+including credential-shaped source rejected as `invalid_file`, remain
+file-attributable and may continue to later agents. An inconclusive judge is `unknown`, including an unavailable judge; no
+automatic retries occur.
+
+Text has per-file details and one final summary. Folder JSON is one
+`schemaVersion: 1`, `kind: kmx.agent-folder-test` document. Its ordered `files`
+rows include an ordinal, safe display directory/name, status and the existing
+safe per-file `result` when available. Root and repository agents with the same
+basename stay distinct for completed results. Unrun rows use `[agent file]`
+rather than an unchecked filename, and have no fabricated result or revisions.
+Non-complete results also withhold discovered agent/tests/recording path names:
+intake refusals may precede resolved-credential checks. Their known revisions
+and selection keys remain, not a claim that the test executed.
+Final `summary` counts are `total`, `passed`, `failed`, `unknown`, `couldNotRun`
+and `notRun`, followed by `exitCode` and `reasonCode`.
+
+Exit 2 takes precedence over assertion-failure exit 1 if any file is unknown,
+could not run or was not run; an empty/invalid discovery also exits 2.
+Otherwise all pass is 0; interruption is 130. Output/diagnostic/summary I/O errors
+are exceptional exit 1 and stop later sends. Output streams one file at a time:
+a failed write can leave a partial document without its final counts.
+Do not interpret partial output as a completed folder result.
+
+The optional GitHub summary opens once before execution, including for an empty
+folder or discovery error. It contains ordinal-only per-file sections and final
+counts, never source paths or authored content. The whole summary is bounded to
+1 MiB; sections that do not fit are omitted with an exact omitted-section count
+and a pointer to the JSON report. Final counts still cover all selected files.
+The summary sink must finish successfully before JSON's final counts are written;
+neither output is an atomic two-sink publication.
 
 ## Existing kmx charters
 
@@ -328,7 +481,7 @@ without inventing charter sections or rewriting the file.
 tested AgentSuite artifact handed off by digest (kmx pushes; the host pulls).
 This export does not implement that deployment path or define a host-side API.
 
-`kmx run-profile export FILE` uses `agentfile.ExportRunProfile`, which calls
+`kmx package run-profile export FILE` uses `agentfile.ExportRunProfile`, which calls
 `Load`/`Parse` once, without configuration, state, provider selection, credentials
 or execution. It accepts the same agent-file shapes as Parse, not the distinct native Squad
 profile. Existing tools/settings and safe parser refusals apply unchanged.

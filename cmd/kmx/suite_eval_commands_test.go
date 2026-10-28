@@ -227,7 +227,7 @@ func suiteKagentCLIArgs(t *testing.T, extension string) ([]string, string, strin
 	}
 	var out, diagnostics bytes.Buffer
 	deps, loads := testDependencies(&out, &diagnostics)
-	if err := execute([]string{"create", "greeter", "--workspace", root, "--runtime", "kagent", "--model", "fixture-suite", "--instructions", input}, deps); err != nil || *loads != 0 {
+	if err := execute([]string{"package", "create", "greeter", "--workspace", root, "--runtime", "kagent", "--model", "fixture-suite", "--instructions", input}, deps); err != nil || *loads != 0 {
 		t.Fatalf("offline kagent authoring: %v loads=%d", err, *loads)
 	}
 	if err := os.WriteFile(filepath.Join(root, "eval/second"+extension), []byte("id: second\ninput: private\nassertions: [{id: text, type: contains, value: answer}]\n"), 0600); err != nil {
@@ -367,14 +367,14 @@ func TestRootPushEvaluationRoutesToPrivateFileConsumer(t *testing.T) {
 			if err := os.WriteFile(file, []byte("{}"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			args := []string{"push", "--workspace", root, "--evaluation", file, "--to-layout", filepath.Join(t.TempDir(), "layout"), "suite:v1"}
+			args := []string{"package", "push", "--workspace", root, "--evaluation", file, "--to-layout", filepath.Join(t.TempDir(), "layout"), "suite:v1"}
 			want := "invalid native passing receipt"
 			if stage == "empty" {
-				args[4] = ""
+				args[5] = ""
 				want = "non-empty --evaluation"
 			}
 			if stage == "extracted" {
-				args = []string{"suite", "push", root, "suite:v1", "--evaluation", file}
+				args = []string{"package", "suite", "push", root, "suite:v1", "--evaluation", file}
 				want = "unknown flag"
 			}
 			var out, diagnostics bytes.Buffer

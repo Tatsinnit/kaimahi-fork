@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/agentpreview"
+	"github.com/kaimahi-agents/kaimahi/internal/kmx/localtools"
 )
 
 // WriteFilePreview renders the shared local-preview projection, not evidence.
@@ -15,6 +18,15 @@ func WriteFilePreview(w io.Writer, r FilePreviewResult, format string) error {
 	if format != "text" {
 		return &FilePreviewError{code: "invalid_options", exit: 1}
 	}
+	return writeFilePreviewText(w, r, true)
+}
+
+// WriteFilePreviewDetails shares file text details without a standalone report heading.
+func WriteFilePreviewDetails(w io.Writer, r FilePreviewResult) error {
+	return writeFilePreviewText(w, r, false)
+}
+
+func writeFilePreviewText(w io.Writer, r FilePreviewResult, standalone bool) error {
 	var b strings.Builder
 	if r.Runner != "" {
 		fmt.Fprintln(&b, r.Runner)
@@ -23,12 +35,22 @@ func WriteFilePreview(w io.Writer, r FilePreviewResult, format string) error {
 	if r.Selection.Scope == "subset" {
 		scope = "partial"
 	}
-	fmt.Fprintf(&b, "kmx local preview of this charter (%s): %s\nrevision: %s\nmodel: %s/%s\n%s %s: %s\n", scope, r.File.Path, r.File.Revision, r.ModelRoute.Provider, r.ModelRoute.Model, r.State, r.Verdict, r.Reason)
+	if standalone {
+		fmt.Fprintf(&b, "kmx local preview of this charter (%s): %s\n", scope, r.File.Path)
+	}
+	fmt.Fprintf(&b, "revision: %s\nmodel: %s/%s\n%s %s: %s\n", r.File.Revision, r.ModelRoute.Provider, r.ModelRoute.Model, r.State, r.Verdict, r.Reason)
+	if r.Tests != nil {
+		fmt.Fprintf(&b, "tests: %s (%s)\ntests revision: %s\nsnapshot revision: %s\n", r.Tests.Path, r.Tests.State, r.Tests.Revision, r.SnapshotRevision)
+	}
 	for _, notice := range r.Notices {
 		fmt.Fprintln(&b, notice)
 	}
 	if r.SavedRevision != "" {
-		fmt.Fprintf(&b, "saved revision: %s (results use the executed revision above)\n", r.SavedRevision)
+		if r.RecordingTarget != nil {
+			fmt.Fprintf(&b, "saved %s revision: %s; saved snapshot: %s (results use the executed snapshot above)\n", r.RecordingTarget.Role, r.SavedRevision, r.SavedSnapshotRevision)
+		} else {
+			fmt.Fprintf(&b, "saved revision: %s (results use the executed revision above)\n", r.SavedRevision)
+		}
 	}
 	for _, tool := range r.ToolSettings {
 		fmt.Fprintf(&b, "tool setting %s: %s\n", tool.Name, tool.State)
@@ -50,7 +72,7 @@ func WriteFilePreview(w io.Writer, r FilePreviewResult, format string) error {
 	}
 	if r.AdHoc != nil {
 		fmt.Fprintf(&b, "ad-hoc: %s\n", r.AdHoc.State)
-		writeFileTools(&b, *r.AdHoc)
+		writeFileTools(&b, *r.AdHoc, r.ToolSettings)
 		if r.AdHoc.AnswerExcerpt != "" {
 			fmt.Fprintf(&b, "  answer excerpt: %q\n", r.AdHoc.AnswerExcerpt)
 		}
@@ -59,9 +81,11 @@ func WriteFilePreview(w io.Writer, r FilePreviewResult, format string) error {
 		label := strings.ToUpper(string(ex.Verdict))
 		if ex.State != "complete" {
 			label = strings.ToUpper(ex.State)
+		} else if r.Operation == "run" && ex.ReasonCode == "completion_ready" && len(ex.Assertions) == 0 {
+			label = "ANSWERED"
 		}
 		fmt.Fprintf(&b, "%s %s (%dms)\n", label, ex.ID, ex.DurationMs)
-		writeFileTools(&b, ex.FilePreviewCompletion)
+		writeFileTools(&b, ex.FilePreviewCompletion, r.ToolSettings)
 		for _, as := range ex.Assertions {
 			reason := as.Reason
 			if as.Failure != "" {
@@ -109,7 +133,11 @@ func WriteFileRunAnswers(w io.Writer, r FilePreviewResult) error {
 	return nil
 }
 
-func writeFileTools(b *strings.Builder, c FilePreviewCompletion) {
+func fileToolUnavailable(tool agentpreview.ToolSummary, settings []localtools.ToolSetting) bool {
+	return tool.Source == "unavailable" && !localtools.IsDisabled(settings, tool.Name)
+}
+
+func writeFileTools(b *strings.Builder, c FilePreviewCompletion, settings []localtools.ToolSetting) {
 	for _, tool := range c.Tools {
 		usage := "Not called"
 		if tool.CallCount > 0 {
@@ -119,5 +147,8 @@ func writeFileTools(b *strings.Builder, c FilePreviewCompletion) {
 			usage += "; recorded just now"
 		}
 		fmt.Fprintf(b, "  tool %s: %s; mode=%s source=%s\n", tool.Name, usage, tool.Mode, tool.Source)
+		if fileToolUnavailable(tool, settings) {
+			fmt.Fprintln(b, "    No recording; tool unavailable.")
+		}
 	}
 }
