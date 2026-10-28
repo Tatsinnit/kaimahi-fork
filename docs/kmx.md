@@ -703,12 +703,14 @@ editability. A restart has no current result;
 a revision change marks the old observation stale and withholds its details.
 Reads perform no inference, mutation or journal retrieval.
 
-The [Windows/WSL plugin](../plugins/copilot-wsl/README.md) and
-[macOS/PATH plugin](../plugins/copilot/README.md) share a native authoring canvas,
-revision-bound chat text fallback and read-only `/agent-view PATH` display over
-this resource. The text opener returns the full revision and exact source only
-when the resource supplied a complete authoring snapshot; its bounded display is
-never an Edit baseline. Canvas and chat Edit/Test/Run use existing same-session MCP tools; only explicit
+On current main, the [Windows/WSL plugin](../plugins/copilot-wsl/README.md) and
+[macOS/PATH plugin](../plugins/copilot/README.md) share a native authoring canvas
+and an unreleased revision-bound chat text fallback over this resource. Native
+`/kmx-canvas open` and `/agent-view PATH` display bounded read-only text only;
+the model-facing `open_kmx_canvas` tool returns the full revision and exact
+source only when the resource supplied a complete authoring snapshot. Its
+bounded display is never an Edit baseline. The v0.9.0-rc.4 marketplace pair does
+not expose that structured text result. Canvas and chat Edit/Test/Run use existing same-session MCP tools; only explicit
 **Suggest tests** starts chat with the exact saved source, path and revision,
 asking Copilot for one revision-checked Edit without running tests or requiring a
 resource-reader tool. Its status acknowledges the request, not a completed addition. Saves require the original revision; changed result

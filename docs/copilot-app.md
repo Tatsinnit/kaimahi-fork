@@ -7,13 +7,18 @@ You want to improve an agent's prompt without losing track of what it should do.
 > issue numbers. Change the prompt, rerun the same tests, then try another model.
 
 kmx keeps the prompt and tests in one Markdown file. Copilot can edit and test it
-through chat, a revision-bound text view or the app canvas. This path needs no
-Kubernetes cluster, Docker or local model download.
+through chat or the app canvas. Current main also supports a revision-bound chat
+text view when no canvas renderer is available. This path needs no Kubernetes
+cluster, Docker or local model download.
 
 **Experimental.** The app walkthrough describes v0.9.0-rc.4. The install below
 pairs that prerelease binary with plugin source pinned to its release commit.
 Updating the plugin alone does not update kmx. Features merged after rc.4 need
 a newer tested pair; a feature on main is not necessarily in your installed release.
+In particular, rc.4 can display bounded, read-only fallback text, but its
+`open_kmx_canvas` result does not return a structured full revision, source or
+editability and cannot seed a revision-checked Edit in a fresh chat. The
+revision-bound text workflow below is unreleased until a later paired release.
 
 ## Install
 
@@ -126,7 +131,7 @@ runs tests.
 
 | Intent | What to type or select | What happens |
 |---|---|---|
-| Create and open | `Create a kmx agent called Release notes that writes a short release note from a supplied pull request title, and open it.` | The builder creates the file, then opens a canvas or revision-bound text view when the extension is available. It does not automatically run tests. |
+| Create and open | `Create a kmx agent called Release notes that writes a short release note from a supplied pull request title, and open it.` | The builder creates the file, then opens a canvas or, on current main, a revision-bound text view when the extension is available. It does not automatically run tests. |
 | Open without a model turn | `/kmx-canvas open release-notes.agent.md` | The native command opens or focuses the existing file. `/kmx-canvas` or `/kmx-canvas help` shows usage. |
 | Open through chat | `Open the kmx agent for release-notes.agent.md` | The model selects the installed opener skill. This uses a model turn. |
 | Run one input | `Use kmx to run release-notes.agent.md with input Add dark mode` | Run sends that input and returns the preview result. |
@@ -174,12 +179,15 @@ headless environment, the CLI can acknowledge a canvas and offer a browser URL
 without displaying a native window; that is not proof of app rendering.
 
 Chat Edit and add-tests requests need complete source plus its current revision.
-The extension's text fallback returns both only from the checked
-`kmx://agent/{path}` authoring snapshot. Its formatted `text` is bounded display
-and never an Edit baseline. If the full snapshot is unavailable, the text view is
-read-only. **Suggest tests** supplies a snapshot by design. Do not treat a
-suggestion, trigger or failed/uncertain Edit as a saved test, and do not run newly
-saved tests unless the user asked.
+On current main, the model-facing `open_kmx_canvas` text result returns both only
+from the checked `kmx://agent/{path}` authoring snapshot. Its formatted `text` is
+bounded display and never an Edit baseline. Native `/kmx-canvas open` displays
+that bounded projection only. The rc.4 pair also exposes bounded text only, so a
+fresh chat cannot begin a revision-checked Edit from its fallback. If the full
+snapshot is unavailable, the current-main text view is read-only. **Suggest
+tests** supplies a snapshot by design. Do not treat a suggestion, trigger or
+failed/uncertain Edit as a saved test, and do not run newly saved tests unless
+the user asked.
 
 ## Create an agent
 
@@ -196,10 +204,11 @@ Files can live in different repositories; installation does not bind kmx to one 
 
 The canvas shows **Prompt**, **Tools** and **Tests**. The saved `.agent.md` file
 holds the prompt, tool names and tests; you can keep it in version control with
-the code it describes. If your host cannot render the canvas, the extension's
-text view returns the full revision and complete source when safe so chat can
-continue with revision-checked edits. Without the extension, only the same chat
-that already holds source/revision can continue safely.
+the code it describes. If your host cannot render the canvas, current main's
+unreleased `open_kmx_canvas` text result returns the full revision and complete
+source when safe so chat can continue with revision-checked edits. The rc.4
+fallback is bounded display only. Without the extension, only the same chat that
+already holds source/revision can continue safely.
 
 Chat reads Run/Test from `structuredContent`, not tool-call success. It reports
 the exact revision, runtime provider/model and full/subset counts, then one row

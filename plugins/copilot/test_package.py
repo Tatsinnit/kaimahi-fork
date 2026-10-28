@@ -271,10 +271,14 @@ class PackageTests(unittest.TestCase):
         prose = " ".join(skill.split())
         for required in ["full-content Edit", "exampleEdits", "SHA-256",
                          "checked complete authoring snapshot", "withhold further edits",
-                         "returned file path and revision", "returned provider/model",
-                         "identity mismatch is **Not current**", "savedRevision",
-                         "held source and revision as stale", "never pair the old source"]:
+                          "returned file path and revision", "returned provider/model",
+                          "identity mismatch is **Not current**", "savedRevision",
+                          "held source and revision as stale", "never pair the old source",
+                          "MCP preflight refusal", "`schemaVersion`, `reasonCode` and `reason`",
+                          "kind: kmx.agent-file-preview", "never report a pass"]:
             self.assertIn(required, prose)
+        self.assertLess(prose.index("MCP preflight refusal"),
+                        prose.index("Require the returned file path and revision"))
         self.assertIn("full scope + `fullPass: true`", prose)
         self.assertIn("`fullPass: false`", prose)
         self.assertIn("Missing, contradictory or unknown fields are not passes.", prose)

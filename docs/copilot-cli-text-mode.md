@@ -1,7 +1,8 @@
 # Copilot CLI text mode
 
-**Status:** Unreleased integration contract for
-[#750](https://github.com/kaimahi-agents/kaimahi/issues/750).
+**Status:** Unreleased current-main integration contract for
+[#750](https://github.com/kaimahi-agents/kaimahi/issues/750). It is not in the
+v0.9.0-rc.4 marketplace pair, whose fallback returns bounded display text only.
 
 This contract makes Create, Edit, Run and Test useful through Copilot chat when
 the host cannot render the kmx canvas. Text mode is a normal presentation of the
@@ -56,6 +57,10 @@ The `open_kmx_canvas` text result is additive:
   }
 }
 ```
+
+This structured result belongs to the model-facing `open_kmx_canvas` tool.
+Native `/kmx-canvas open` logs only the bounded text projection and does not
+return `file` or `authoring` to chat; `/agent-view` is likewise read-only.
 
 If the resource has no complete authoring snapshot, the result stays readable
 but is explicitly not editable:
@@ -114,6 +119,13 @@ case count. Emit one row for every returned example, retaining its test ID,
 state, verdict and safe `reasonCode`; a non-pass row may also name its attributed
 assertion ID/type/reason code.
 
+First distinguish the exact MCP preflight envelope: `schemaVersion`,
+`reasonCode` and `reason`, with no `kind`. It is not a preview. Report
+`cancelled` as **Cancelled**, `deadline_exceeded` or `operation_failed` as
+**Did not finish**, and every other safe preflight code as **Refused**. Do not
+invent preview identity, state or verdict, and never report a pass. Any other
+result must have `kind: kmx.agent-file-preview` before the preview checks below.
+
 The returned file path and revision must match the held invocation target and
 revision. An explicitly requested model or trusted route must also match the
 returned provider/model; when none was supplied, the attributable returned route
@@ -145,9 +157,10 @@ MCP call alone proves no verdict. Subset selection remains partial even when all
 returned rows pass.
 
 Set `showContent: true` only when the user asks to see an answer. Show only a
-safe answer/excerpt returned by that invocation. `not_requested`, absent or
-withheld content is unavailable; do not infer it from journals, history or a new
-Run. Ordinary Test reporting keeps failure-only content.
+safe answer/excerpt returned by that invocation. Treat absent or withheld
+content as unavailable; do not infer it from journals, history or a new Run.
+`retention.status: not_requested` concerns failure-diagnostic retention, not
+answer availability. Ordinary Test reporting keeps failure-only content.
 
 ## Skill and command names
 
@@ -155,7 +168,8 @@ The Copilot CLI uses the installed skill's full entry, not a universal `/kmx`
 alias. The WSL/native source entry is `/kmx-agent-builder:kmx`; the PATH source
 entry is `/kmx-agent-builder-path:kmx`. Natural-language opening remains valid.
 Native `/kmx-canvas` and `/agent-view` still require the extension and are
-separate from skill invocation.
+separate from skill invocation. They display bounded text and never return
+structured Edit authority to chat.
 
 ## Acceptance
 

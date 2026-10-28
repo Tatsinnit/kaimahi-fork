@@ -33,6 +33,12 @@ The WSL and native-bundle plugins share the name `kmx-agent-builder`; PATH uses
 `kmx-agent-builder-path`. Install only one variant per host profile.
 For an existing direct install, follow [migration and paired upgrades](../../docs/copilot-app.md#existing-direct-installs-and-upgrades), rather than leaving both registrations active.
 
+**Release boundary:** The v0.9.0-rc.4 marketplace plugin can display bounded,
+read-only fallback text, but its `open_kmx_canvas` result does not return a
+structured full revision, source or editability and cannot seed a
+revision-checked Edit in a fresh chat. The structured text workflow described
+below is unreleased current-main behavior until a later paired release.
+
 ## Use
 
 In Copilot, ask: `Create a kmx agent called Release notes that writes a short
@@ -43,11 +49,12 @@ handles files in unrelated repositories.
 To open an existing file without a model turn, use
 `/kmx-canvas open /mnt/c/work/release-notes.agent.md`. Keep path spaces literal,
 without surrounding quotes. `/kmx-canvas` or `/kmx-canvas help` shows usage;
-`/agent-view FULL_PATH` shows bounded read-only text. The chat opener's text mode
-also returns exact source/revision when the checked resource is editable, so a
-fresh extension-backed chat can continue with revision-checked Edit. Native open
-was checked in the Copilot app with a main build before rc.4 that includes the
-fix, not the released rc.4 pair. If it fails or shows nothing, try
+`/agent-view FULL_PATH` shows bounded read-only text. Native `/kmx-canvas open`
+also displays only that bounded fallback. On current main, the separate chat
+tool's text mode returns exact source/revision when the checked resource is
+editable, so a fresh extension-backed chat can continue with revision-checked
+Edit. Native open was checked in the Copilot app with a main build before rc.4
+that includes the fix, not the released rc.4 pair. If it fails or shows nothing, try
 `Open the kmx agent for FULL_PATH` through chat.
 
 In the interactive CLI, use `copilot --experimental` to load those native
@@ -87,12 +94,14 @@ prompts and inputs to the selected model. On hosts that forward native tool
 progress, test rows update as cases finish. The final full Test result remains
 authoritative. Local model comparison is lost when the canvas is closed and
 reopened. An unconfirmed execution requires reload rather than silently retrying.
-If the host has no canvas renderer, text mode is a normal success path. Chat
+On current main, if the host has no canvas renderer, text mode is a normal
+success path. Chat
 reports structured Test rows and keeps a chosen runtime model for that exact file
 within the conversation. It lists newly saved tests as not run, requests answer
 content only when asked and never reruns to recover omitted content. Without the
 extension, a same-chat workflow can continue from returned source/revision, but a
-fresh chat cannot safely reopen an existing file.
+fresh chat cannot safely reopen an existing file. With rc.4, fallback text is
+display-only and opening an existing file does not establish an Edit baseline.
 
 See the [agent-file guide](../../docs/agent-file.md) for authoring and checks,
 and the [macOS/PATH plugin guide](../copilot/README.md) for the Mac install and

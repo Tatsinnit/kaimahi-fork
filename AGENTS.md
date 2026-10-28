@@ -630,7 +630,9 @@ formatted or truncated text. Without the extension, same-chat Create/Edit/Run/Te
 may continue from returned source/revision, but a fresh chat gains no read tool or
 shell fallback. Shared skills read Run/Test structuredContent, preserve full versus
 subset and fail/unknown/refused/cancelled/error distinctions, and never infer pass
-from tool success. Returned path/revision and any explicit requested route/model
+from tool success. Handle the exact three-field MCP preflight refusal before
+preview attribution; every other Run/Test result requires the preview kind.
+Returned path/revision and any explicit requested route/model
 must match the held invocation before attribution; mismatch is not current, never
 pass. Conversation-local model choice is path-scoped, never source or
 history; answer content requires an explicit request and is never recovered by a
@@ -655,7 +657,10 @@ same sources; do not maintain a second canvas/skill implementation. The macOS/PA
 plugin in `plugins/copilot` links to those shared sources except for generated
 provider-identity copies of both skills and `extension.mjs`. Regenerate these
 with `python3 plugins/copilot/source_release.py --write` in every PR that changes
-their canonical inputs; CI checks parity without writing. Its source plugin name
+their canonical inputs; CI checks parity without writing. Conservative Python
+identity-shape checks run before regeneration, while the mocked-SDK Node import
+of both real extensions is the semantic provider-registration authority; release
+publication requires both. Its source plugin name
 is `kmx-agent-builder-path`; WSL/native bundles keep `kmx-agent-builder`, and the
 MCP server key remains unchanged. Its MCP command is `/usr/local/bin/kmx mcp`,
 matching the installer destination without relying on a Dock-launched app's PATH.
